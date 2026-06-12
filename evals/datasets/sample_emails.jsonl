@@ -1,0 +1,2 @@
+{"name":"single_task_project_email","input":{"tenantId":"tenant-1","mailbox":"jesse@tenant.com","direction":"sent","graphEventId":"graph-1","internetMessageId":"<msg-1@tenant.com>","messageId":"msg-1","subject":"Electrical scope update","bodyText":"Tessa, please update the electrical scope by next Friday at 5.","sentDateTime":"2026-05-15T14:30:00-04:00","from":{"email":"jesse@tenant.com","name":"Jesse"},"to":[{"email":"tessa@tenant.com","name":"Tessa"}],"cc":[],"bcc":[],"idempotencyKey":"key-1","correlationId":"corr-1"},"expectedStatus":"tasks_ready"}
+

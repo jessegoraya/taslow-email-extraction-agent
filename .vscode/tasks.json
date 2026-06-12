@@ -1,0 +1,87 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Validate Agent Inspector prerequisites",
+      "type": "aitk",
+      "command": "debug-check-prerequisites",
+      "args": {
+        "portOccupancy": [5679, 8087]
+      }
+    },
+    {
+      "label": "Run Taslow Agent Inspector Server",
+      "type": "shell",
+      "command": "C:/Users/jgora/miniconda3/python.exe -m debugpy --listen 127.0.0.1:5679 -m agentdev run ${workspaceFolder}/inspector_entrypoint.py --port 8087",
+      "isBackground": true,
+      "dependsOn": ["Validate Agent Inspector prerequisites"],
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "PYTHONPATH": "${workspaceFolder}/src",
+          "PYTHONIOENCODING": "utf-8"
+        }
+      },
+      "problemMatcher": {
+        "pattern": [
+          {
+            "regexp": "^.*$",
+            "file": 0,
+            "location": 1,
+            "message": 2
+          }
+        ],
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".*",
+          "endsPattern": "Responses protocol|Application startup complete|running on|Running on|Uvicorn running"
+        }
+      }
+    },
+    {
+      "label": "Start Taslow Agent Inspector Server",
+      "type": "shell",
+      "command": "C:/Users/jgora/miniconda3/python.exe -m agentdev run ${workspaceFolder}/inspector_entrypoint.py --port 8087",
+      "isBackground": true,
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "PYTHONPATH": "${workspaceFolder}/src",
+          "PYTHONIOENCODING": "utf-8"
+        }
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Open Agent Inspector",
+      "type": "shell",
+      "command": "echo '${input:openAgentInspector}'",
+      "presentation": {
+        "reveal": "never"
+      },
+      "dependsOn": ["Run Taslow Agent Inspector Server"]
+    },
+    {
+      "label": "Terminate Agent Inspector",
+      "command": "echo ${input:terminate}",
+      "type": "shell",
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "openAgentInspector",
+      "type": "command",
+      "command": "ai-mlstudio.openTestTool",
+      "args": {
+        "port": 8087
+      }
+    },
+    {
+      "id": "terminate",
+      "type": "command",
+      "command": "workbench.action.tasks.terminate",
+      "args": "terminateAll"
+    }
+  ]
+}

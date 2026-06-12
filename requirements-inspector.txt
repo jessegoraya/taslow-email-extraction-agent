@@ -1,0 +1,5 @@
+-r requirements-dev.txt
+agent-dev-cli --pre
+agent-framework-foundry-hosting
+debugpy
+
