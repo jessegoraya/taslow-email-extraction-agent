@@ -18,6 +18,15 @@ class Settings(BaseSettings):
     azure_ai_model_deployment_name: str | None = Field(
         default=None, alias="AZURE_AI_MODEL_DEPLOYMENT_NAME"
     )
+    azure_openai_chat_api_version: str = Field(
+        default="2024-08-01-preview", alias="AZURE_OPENAI_CHAT_API_VERSION"
+    )
+    agent_task_extractor_provider: str = Field(
+        default="foundry", alias="AGENT_TASK_EXTRACTOR_PROVIDER"
+    )
+    agent_task_extractor_fallback_enabled: bool = Field(
+        default=True, alias="AGENT_TASK_EXTRACTOR_FALLBACK_ENABLED"
+    )
     project_service_base_url: str | None = Field(default=None, alias="PROJECT_SERVICE_BASE_URL")
     task_service_base_url: str | None = Field(default=None, alias="TASK_SERVICE_BASE_URL")
     taslow_service_api_key: str | None = Field(default=None, alias="TASLOW_SERVICE_API_KEY")
@@ -44,6 +53,15 @@ class Settings(BaseSettings):
     scope_search_top_k: int = Field(default=5, alias="SCOPE_SEARCH_TOP_K")
     agent_search_dependency_retry_enabled: bool = Field(
         default=True, alias="AGENT_SEARCH_DEPENDENCY_RETRY_ENABLED"
+    )
+    agent_scope_web_grounding_enabled: bool = Field(
+        default=False, alias="AGENT_SCOPE_WEB_GROUNDING_ENABLED"
+    )
+    agent_scope_web_grounding_provider: str = Field(
+        default="none", alias="AGENT_SCOPE_WEB_GROUNDING_PROVIDER"
+    )
+    agent_scope_web_grounding_max_queries: int = Field(
+        default=0, alias="AGENT_SCOPE_WEB_GROUNDING_MAX_QUERIES"
     )
 
     project_confidence_threshold: float = Field(default=0.80, alias="PROJECT_CONFIDENCE_THRESHOLD")

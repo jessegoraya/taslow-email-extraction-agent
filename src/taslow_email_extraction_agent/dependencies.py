@@ -30,7 +30,7 @@ def build_services() -> WorkflowServices:
 
     return WorkflowServices(
         settings=settings,
-        task_extractor=FoundryTaskExtractor(),
+        task_extractor=FoundryTaskExtractor(settings),
         project_client=project_client,
         task_history_client=EmptyTaskHistoryClient(),
         project_search_client=project_search_client,

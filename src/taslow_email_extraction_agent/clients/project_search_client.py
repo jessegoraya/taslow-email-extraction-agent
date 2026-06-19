@@ -17,6 +17,9 @@ class SearchCandidate:
     project_id: str
     scope_id: str | None
     score: float
+    rank: int = 0
+    score_raw: float | None = None
+    score_margin: float = 0.0
 
 
 class ProjectSearchClient(Protocol):
@@ -115,11 +118,12 @@ class AzureProjectSearchClient:
         except httpx.HTTPError as exc:
             raise ProjectSearchUnavailable("Azure AI Search query failed.") from exc
 
-        return [
+        rows = [
             SearchCandidate(
                 project_id=row.get("projectId") or "",
                 scope_id=row.get("scopeId"),
                 score=float(row.get("@search.score") or 0.0),
+                score_raw=float(row.get("@search.score") or 0.0),
             )
             for row in body.get("value", [])
             if row.get("projectId")
@@ -128,6 +132,7 @@ class AzureProjectSearchClient:
             and row.get("searchStatus") == "active"
             and row.get("isArchived") is False
         ]
+        return _normalize_candidates(rows)
 
     async def _embed_query(self, query_text: str) -> list[float]:
         url = (
@@ -153,3 +158,35 @@ class AzureProjectSearchClient:
 
 def _escape_odata(value: str) -> str:
     return value.replace("'", "''")
+
+
+def _normalize_candidates(candidates: list[SearchCandidate]) -> list[SearchCandidate]:
+    if not candidates:
+        return []
+
+    raw_scores = [
+        candidate.score_raw if candidate.score_raw is not None else candidate.score
+        for candidate in candidates
+    ]
+    top_score = max(raw_scores) if raw_scores else 0.0
+    second_score = sorted(raw_scores, reverse=True)[1] if len(raw_scores) > 1 else 0.0
+    margin = max(0.0, top_score - second_score)
+
+    normalized: list[SearchCandidate] = []
+    for index, candidate in enumerate(candidates, start=1):
+        raw = candidate.score_raw if candidate.score_raw is not None else candidate.score
+        # Azure AI Search vector scores are useful for ranking, but not a calibrated confidence.
+        # Keep the top result near its original score and preserve relative distance.
+        relative = raw / top_score if top_score > 0 else 0.0
+        normalized_score = max(0.0, min(1.0, (raw * 0.70) + (relative * 0.30)))
+        normalized.append(
+            SearchCandidate(
+                project_id=candidate.project_id,
+                scope_id=candidate.scope_id,
+                score=round(normalized_score, 4),
+                rank=index,
+                score_raw=round(raw, 4),
+                score_margin=round(margin, 4) if index == 1 else 0.0,
+            )
+        )
+    return normalized

@@ -25,7 +25,7 @@ async def normalize_due_date(
     task: ExtractedTaskCandidate,
 ) -> tuple[datetime | None, float | None, list[str]]:
     base = request.sent_date_time
-    due_text = task.due_text
+    due_text = task.due_text or _extract_due_text(" ".join([task.title, task.description]))
     if not base or not due_text:
         return None, None, []
 
@@ -54,11 +54,28 @@ async def normalize_due_date(
             return due, 0.84, evidence
 
     try:
-        parsed = parse(due_text, default=base)
+        default_due = datetime.combine(base.date(), default_due_time)
+        parsed = parse(_clean_due_text(due_text), default=default_due)
     except (ValueError, OverflowError):
         return None, None, []
 
     return parsed, 0.78, evidence
+
+
+def _extract_due_text(text: str) -> str | None:
+    match = re.search(
+        r"\b(?:by|before|due)\s+([A-Z][a-z]+\s+\d{1,2}(?:,\s*\d{4})?|"
+        r"\d{1,2}/\d{1,2}(?:/\d{2,4})?|tomorrow|next\s+\w+|"
+        r"monday|tuesday|wednesday|thursday|friday|saturday|sunday)",
+        text,
+        re.IGNORECASE,
+    )
+    return match.group(0) if match else None
+
+
+def _clean_due_text(text: str) -> str:
+    cleaned = re.sub(r"^\s*(by|before|due)\s+", "", text.strip(), flags=re.IGNORECASE)
+    return cleaned.strip(" .;,")
 
 
 def _extract_time(text: str, default_time: time) -> time:

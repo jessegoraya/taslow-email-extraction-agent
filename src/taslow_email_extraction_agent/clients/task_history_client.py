@@ -24,4 +24,22 @@ class InMemoryTaskHistoryClient:
             return self._by_conversation_id[request.conversation_id]
         if request.parent_message_id and request.parent_message_id in self._by_conversation_id:
             return self._by_conversation_id[request.parent_message_id]
+        if request.internet_message_id and request.internet_message_id in self._by_conversation_id:
+            return self._by_conversation_id[request.internet_message_id]
+        if request.message_id and request.message_id in self._by_conversation_id:
+            return self._by_conversation_id[request.message_id]
         return None
+
+    def record_thread_context(
+        self,
+        request: EmailExtractionRequest,
+        context: ThreadContext,
+    ) -> None:
+        for key in [
+            request.conversation_id,
+            request.parent_message_id,
+            request.internet_message_id,
+            request.message_id,
+        ]:
+            if key:
+                self._by_conversation_id[key] = context

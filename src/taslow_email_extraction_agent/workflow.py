@@ -23,6 +23,8 @@ from taslow_email_extraction_agent.models import (
     ExtractionStatus,
     ProjectMatchResult,
     ProjectScope,
+    ProjectScoringDiagnostics,
+    ThreadContext,
 )
 from taslow_email_extraction_agent.services import WorkflowServices
 
@@ -56,6 +58,9 @@ async def email_extraction_workflow(message: WorkflowInput) -> EmailExtractionRe
     warnings: list[str] = []
 
     tasks = await detect_tasks(request, services.task_extractor)
+    task_extractor_info = getattr(services.task_extractor, "last_run_info", None)
+    if task_extractor_info and task_extractor_info.warning:
+        warnings.append(task_extractor_info.warning)
     if not tasks:
         return _response(
             request=request,
@@ -86,7 +91,13 @@ async def email_extraction_workflow(message: WorkflowInput) -> EmailExtractionRe
         )
 
     candidates = await retrieve_project_candidates(projects)
-    project_score = await score_project_candidates(request, tasks, candidates, thread_context)
+    project_score = await score_project_candidates(
+        request,
+        tasks,
+        candidates,
+        thread_context,
+        services.settings.project_confidence_threshold,
+    )
 
     if (
         not project_score
@@ -119,6 +130,8 @@ async def email_extraction_workflow(message: WorkflowInput) -> EmailExtractionRe
         ExtractionStatus.TASKS_READY if valid_assignments else ExtractionStatus.NO_PROJECT_MATCH
     )
     stopped_after = None if valid_assignments else "ResultValidationExecutor"
+    if status == ExtractionStatus.TASKS_READY:
+        _record_thread_context(request, services, project_score, valid_assignments)
 
     return _response(
         request=request,
@@ -208,13 +221,26 @@ async def _retrieve_projects(
     candidates = await services.project_search_client.search_projects(
         request.tenant_id, search_text
     )
+    projects_by_id = {
+        project.project_id: project
+        for project in await services.project_client.get_project_context_batch(
+            request.tenant_id, [candidate.project_id for candidate in candidates]
+        )
+    }
     projects = []
     for candidate in candidates:
-        project = await services.project_client.get_project_detail(
-            request.tenant_id, candidate.project_id
-        )
+        project = projects_by_id.get(candidate.project_id)
         if project:
-            projects.append(project.model_copy(update={"search_score": candidate.score}))
+            projects.append(
+                project.model_copy(
+                    update={
+                        "search_score": candidate.score,
+                        "search_score_raw": candidate.score_raw,
+                        "search_rank": candidate.rank,
+                        "search_margin": candidate.score_margin,
+                    }
+                )
+            )
     return projects
 
 
@@ -230,9 +256,18 @@ async def _apply_scope_search_scores(
     candidates = await services.project_search_client.search_scopes(
         request.tenant_id, project.project_id, task_text
     )
-    scores_by_scope = {candidate.scope_id: candidate.score for candidate in candidates}
+    scores_by_scope = {candidate.scope_id: candidate for candidate in candidates}
     scopes: list[ProjectScope] = [
-        scope.model_copy(update={"search_score": scores_by_scope.get(scope.scope_id)})
+        scope.model_copy(
+            update={
+                "search_score": scores_by_scope[scope.scope_id].score,
+                "search_score_raw": scores_by_scope[scope.scope_id].score_raw,
+                "search_rank": scores_by_scope[scope.scope_id].rank,
+                "search_margin": scores_by_scope[scope.scope_id].score_margin,
+            }
+        )
+        if scope.scope_id in scores_by_scope
+        else scope
         for scope in project.scopes
     ]
     return project.model_copy(update={"scopes": scopes})
@@ -270,6 +305,7 @@ def _response(
     stopped_after: str | None,
     warnings: list[str],
 ) -> EmailExtractionResponse:
+    task_info = getattr(services.task_extractor, "last_run_info", None)
     return EmailExtractionResponse(
         agentRunId=str(uuid4()),
         status=status,
@@ -282,10 +318,23 @@ def _response(
         tasks=assignments,
         diagnostics=ExtractionDiagnostics(
             model=services.settings.azure_ai_model_deployment_name,
+            taskExtractorProvider=task_info.provider if task_info else None,
+            modelDeployment=task_info.model_deployment if task_info else None,
+            modelFallbackUsed=task_info.fallback_used if task_info else False,
+            modelInputTokenCount=task_info.input_tokens if task_info else None,
+            modelOutputTokenCount=task_info.output_tokens if task_info else None,
             projectThreshold=services.settings.project_confidence_threshold,
             scopeThreshold=services.settings.scope_confidence_threshold,
             assigneeThreshold=services.settings.assignee_confidence_threshold,
             dueDateThreshold=services.settings.due_date_confidence_threshold,
+            projectHydrationProvider="project-agent-context"
+            if services.project_search_client
+            else "active-projects",
+            searchQueryCount=1 if services.project_search_client and task_candidate_count else 0,
+            scopeSearchQueryCount=len(assignments)
+            if services.project_search_client and assignments
+            else 0,
+            projectScoring=_project_scoring_diagnostics(project_match),
             stoppedAfter=stopped_after,
             warnings=warnings,
         ),
@@ -299,6 +348,7 @@ def _retryable_response(
     warnings: list[str],
     stopped_after: str,
 ) -> EmailExtractionResponse:
+    task_info = getattr(services.task_extractor, "last_run_info", None)
     return EmailExtractionResponse(
         agentRunId=str(uuid4()),
         status=ExtractionStatus.RETRYABLE,
@@ -311,15 +361,66 @@ def _retryable_response(
         tasks=[],
         diagnostics=ExtractionDiagnostics(
             model=services.settings.azure_ai_model_deployment_name,
+            taskExtractorProvider=task_info.provider if task_info else None,
+            modelDeployment=task_info.model_deployment if task_info else None,
+            modelFallbackUsed=task_info.fallback_used if task_info else False,
+            modelInputTokenCount=task_info.input_tokens if task_info else None,
+            modelOutputTokenCount=task_info.output_tokens if task_info else None,
             projectThreshold=services.settings.project_confidence_threshold,
             scopeThreshold=services.settings.scope_confidence_threshold,
             assigneeThreshold=services.settings.assignee_confidence_threshold,
             dueDateThreshold=services.settings.due_date_confidence_threshold,
+            projectHydrationProvider="project-agent-context"
+            if services.project_search_client
+            else "active-projects",
+            searchQueryCount=1 if services.project_search_client and task_candidate_count else 0,
+            scopeSearchQueryCount=0,
             stoppedAfter=stopped_after,
             warnings=warnings,
             retrySchedule=["PT10M", "PT4H", "PT24H"]
             if services.settings.agent_search_dependency_retry_enabled
             else [],
             manualExecutionRequired=False,
+        ),
+    )
+
+
+def _project_scoring_diagnostics(
+    project_match: ProjectMatchResult | None,
+) -> ProjectScoringDiagnostics | None:
+    if not project_match:
+        return None
+    return ProjectScoringDiagnostics(
+        searchScoreRaw=project_match.search_score_raw,
+        searchScoreNormalized=project_match.search_score_normalized,
+        searchRank=project_match.search_rank,
+        searchMargin=project_match.search_margin,
+        participantScore=project_match.participant_score,
+        peopleContextScore=project_match.people_context_score,
+        lexicalScore=project_match.lexical_score,
+        threshold=project_match.threshold,
+        decisionReason=project_match.decision_reason,
+    )
+
+
+def _record_thread_context(
+    request: EmailExtractionRequest,
+    services: WorkflowServices,
+    project_score: ProjectScore,
+    assignments: list[ExtractedTaskAssignment],
+) -> None:
+    recorder = getattr(services.task_history_client, "record_thread_context", None)
+    if not recorder:
+        return
+    scope_id = next(
+        (assignment.scope_id for assignment in assignments if assignment.scope_id),
+        None,
+    )
+    recorder(
+        request,
+        ThreadContext(
+            projectId=project_score.project.project_id,
+            scopeId=scope_id,
+            confidence=project_score.result.confidence,
         ),
     )

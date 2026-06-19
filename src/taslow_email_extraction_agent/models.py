@@ -121,6 +121,9 @@ class ProjectScope(BaseModel):
     embeddings: list[float] = Field(default_factory=list)
     group_task_set_id: str | None = Field(default=None, alias="groupTaskSetId")
     search_score: float | None = Field(default=None, alias="searchScore")
+    search_score_raw: float | None = Field(default=None, alias="searchScoreRaw")
+    search_rank: int | None = Field(default=None, alias="searchRank")
+    search_margin: float | None = Field(default=None, alias="searchMargin")
 
     @property
     def combined_text(self) -> str:
@@ -133,6 +136,9 @@ class ProjectContext(BaseModel):
     description: str = ""
     desc_vector: list[float] = Field(default_factory=list, alias="descVector")
     search_score: float | None = Field(default=None, alias="searchScore")
+    search_score_raw: float | None = Field(default=None, alias="searchScoreRaw")
+    search_rank: int | None = Field(default=None, alias="searchRank")
+    search_margin: float | None = Field(default=None, alias="searchMargin")
     associated_people: list[AssociatedPerson] = Field(
         default_factory=list, alias="associatedPeople"
     )
@@ -171,6 +177,27 @@ class ProjectMatchResult(BaseModel):
     project_name: str | None = Field(default=None, alias="projectName")
     confidence: float = 0.0
     evidence: list[str] = Field(default_factory=list)
+    search_score_raw: float | None = Field(default=None, alias="searchScoreRaw")
+    search_score_normalized: float | None = Field(default=None, alias="searchScoreNormalized")
+    search_rank: int | None = Field(default=None, alias="searchRank")
+    search_margin: float | None = Field(default=None, alias="searchMargin")
+    participant_score: float | None = Field(default=None, alias="participantScore")
+    people_context_score: float | None = Field(default=None, alias="peopleContextScore")
+    lexical_score: float | None = Field(default=None, alias="lexicalScore")
+    threshold: float | None = None
+    decision_reason: str | None = Field(default=None, alias="decisionReason")
+
+
+class ProjectScoringDiagnostics(BaseModel):
+    search_score_raw: float | None = Field(default=None, alias="searchScoreRaw")
+    search_score_normalized: float | None = Field(default=None, alias="searchScoreNormalized")
+    search_rank: int | None = Field(default=None, alias="searchRank")
+    search_margin: float | None = Field(default=None, alias="searchMargin")
+    participant_score: float | None = Field(default=None, alias="participantScore")
+    people_context_score: float | None = Field(default=None, alias="peopleContextScore")
+    lexical_score: float | None = Field(default=None, alias="lexicalScore")
+    threshold: float | None = None
+    decision_reason: str | None = Field(default=None, alias="decisionReason")
 
 
 class ExtractedTaskAssignment(BaseModel):
@@ -192,10 +219,21 @@ class ExtractedTaskAssignment(BaseModel):
 
 class ExtractionDiagnostics(BaseModel):
     model: str | None = None
+    task_extractor_provider: str | None = Field(default=None, alias="taskExtractorProvider")
+    model_deployment: str | None = Field(default=None, alias="modelDeployment")
+    model_fallback_used: bool = Field(default=False, alias="modelFallbackUsed")
+    model_input_token_count: int | None = Field(default=None, alias="modelInputTokenCount")
+    model_output_token_count: int | None = Field(default=None, alias="modelOutputTokenCount")
     project_threshold: float = Field(alias="projectThreshold")
     scope_threshold: float = Field(alias="scopeThreshold")
     assignee_threshold: float = Field(alias="assigneeThreshold")
     due_date_threshold: float = Field(alias="dueDateThreshold")
+    project_hydration_provider: str | None = Field(default=None, alias="projectHydrationProvider")
+    search_query_count: int = Field(default=0, alias="searchQueryCount")
+    scope_search_query_count: int = Field(default=0, alias="scopeSearchQueryCount")
+    project_scoring: ProjectScoringDiagnostics | None = Field(
+        default=None, alias="projectScoring"
+    )
     stopped_after: str | None = Field(default=None, alias="stoppedAfter")
     warnings: list[str] = Field(default_factory=list)
     retry_schedule: list[str] = Field(default_factory=list, alias="retrySchedule")
