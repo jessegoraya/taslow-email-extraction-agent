@@ -139,6 +139,7 @@ class ProjectContext(BaseModel):
     search_score_raw: float | None = Field(default=None, alias="searchScoreRaw")
     search_rank: int | None = Field(default=None, alias="searchRank")
     search_margin: float | None = Field(default=None, alias="searchMargin")
+    client_domains: list[str] = Field(default_factory=list, alias="clientDomains")
     associated_people: list[AssociatedPerson] = Field(
         default_factory=list, alias="associatedPeople"
     )
@@ -154,6 +155,22 @@ class ProjectContext(BaseModel):
     @property
     def combined_text(self) -> str:
         return " ".join(part for part in [self.project_name, self.description] if part).strip()
+
+    @field_validator("client_domains", mode="before")
+    @classmethod
+    def normalize_client_domains(cls, value: Any) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            values = [value]
+        else:
+            values = list(value)
+        normalized = {
+            str(item).strip().lower().removeprefix("@")
+            for item in values
+            if str(item).strip()
+        }
+        return sorted(normalized)
 
 
 class ThreadContext(BaseModel):
@@ -183,6 +200,7 @@ class ProjectMatchResult(BaseModel):
     search_margin: float | None = Field(default=None, alias="searchMargin")
     participant_score: float | None = Field(default=None, alias="participantScore")
     people_context_score: float | None = Field(default=None, alias="peopleContextScore")
+    client_domain_score: float | None = Field(default=None, alias="clientDomainScore")
     lexical_score: float | None = Field(default=None, alias="lexicalScore")
     threshold: float | None = None
     decision_reason: str | None = Field(default=None, alias="decisionReason")
@@ -195,6 +213,7 @@ class ProjectScoringDiagnostics(BaseModel):
     search_margin: float | None = Field(default=None, alias="searchMargin")
     participant_score: float | None = Field(default=None, alias="participantScore")
     people_context_score: float | None = Field(default=None, alias="peopleContextScore")
+    client_domain_score: float | None = Field(default=None, alias="clientDomainScore")
     lexical_score: float | None = Field(default=None, alias="lexicalScore")
     threshold: float | None = None
     decision_reason: str | None = Field(default=None, alias="decisionReason")
@@ -233,6 +252,9 @@ class ExtractionDiagnostics(BaseModel):
     scope_search_query_count: int = Field(default=0, alias="scopeSearchQueryCount")
     project_scoring: ProjectScoringDiagnostics | None = Field(
         default=None, alias="projectScoring"
+    )
+    project_candidate_scores: list[ProjectMatchResult] = Field(
+        default_factory=list, alias="projectCandidateScores"
     )
     stopped_after: str | None = Field(default=None, alias="stoppedAfter")
     warnings: list[str] = Field(default_factory=list)

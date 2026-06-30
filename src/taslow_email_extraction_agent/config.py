@@ -63,6 +63,12 @@ class Settings(BaseSettings):
     agent_scope_web_grounding_max_queries: int = Field(
         default=0, alias="AGENT_SCOPE_WEB_GROUNDING_MAX_QUERIES"
     )
+    agent_assignee_reranker_enabled: bool = Field(
+        default=False, alias="AGENT_ASSIGNEE_RERANKER_ENABLED"
+    )
+    agent_scope_reranker_enabled: bool = Field(
+        default=False, alias="AGENT_SCOPE_RERANKER_ENABLED"
+    )
 
     project_confidence_threshold: float = Field(default=0.80, alias="PROJECT_CONFIDENCE_THRESHOLD")
     scope_confidence_threshold: float = Field(default=0.75, alias="SCOPE_CONFIDENCE_THRESHOLD")

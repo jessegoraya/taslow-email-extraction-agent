@@ -9,6 +9,12 @@ from taslow_email_extraction_agent.clients.project_client import (
 from taslow_email_extraction_agent.clients.project_search_client import AzureProjectSearchClient
 from taslow_email_extraction_agent.clients.task_history_client import EmptyTaskHistoryClient
 from taslow_email_extraction_agent.config import get_settings
+from taslow_email_extraction_agent.executors.reranking import (
+    FoundryAssigneeReranker,
+    FoundryScopeReranker,
+    NoOpAssigneeReranker,
+    NoOpScopeReranker,
+)
 from taslow_email_extraction_agent.executors.task_detection import FoundryTaskExtractor
 from taslow_email_extraction_agent.services import WorkflowServices
 
@@ -34,6 +40,12 @@ def build_services() -> WorkflowServices:
         project_client=project_client,
         task_history_client=EmptyTaskHistoryClient(),
         project_search_client=project_search_client,
+        assignee_reranker=FoundryAssigneeReranker(settings)
+        if settings.agent_assignee_reranker_enabled
+        else NoOpAssigneeReranker(),
+        scope_reranker=FoundryScopeReranker(settings)
+        if settings.agent_scope_reranker_enabled
+        else NoOpScopeReranker(),
     )
 
 

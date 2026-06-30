@@ -6,6 +6,7 @@ from taslow_email_extraction_agent.clients.project_client import ProjectClient
 from taslow_email_extraction_agent.clients.project_search_client import ProjectSearchClient
 from taslow_email_extraction_agent.clients.task_history_client import TaskHistoryClient
 from taslow_email_extraction_agent.config import Settings
+from taslow_email_extraction_agent.executors.reranking import AssigneeReranker, ScopeReranker
 from taslow_email_extraction_agent.executors.task_detection import TaskExtractor
 
 
@@ -16,3 +17,5 @@ class WorkflowServices:
     project_client: ProjectClient
     task_history_client: TaskHistoryClient
     project_search_client: ProjectSearchClient | None = None
+    assignee_reranker: AssigneeReranker | None = None
+    scope_reranker: ScopeReranker | None = None

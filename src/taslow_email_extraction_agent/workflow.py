@@ -16,9 +16,11 @@ from taslow_email_extraction_agent.executors.scope_matching import match_scope_a
 from taslow_email_extraction_agent.executors.task_detection import detect_tasks
 from taslow_email_extraction_agent.executors.validation import validate_assignments
 from taslow_email_extraction_agent.models import (
+    AssociatedPerson,
     EmailExtractionRequest,
     EmailExtractionResponse,
     ExtractedTaskAssignment,
+    ExtractedTaskCandidate,
     ExtractionDiagnostics,
     ExtractionStatus,
     ProjectMatchResult,
@@ -27,6 +29,7 @@ from taslow_email_extraction_agent.models import (
     ThreadContext,
 )
 from taslow_email_extraction_agent.services import WorkflowServices
+from taslow_email_extraction_agent.text_utils import task_context_text
 
 
 @dataclass(slots=True)
@@ -109,6 +112,7 @@ async def email_extraction_workflow(message: WorkflowInput) -> EmailExtractionRe
             status=ExtractionStatus.NO_PROJECT_MATCH,
             task_candidate_count=len(tasks),
             project_match=project_score.result if project_score else None,
+            project_candidates=project_score.candidate_results if project_score else [],
             assignments=[],
             stopped_after="ProjectScoringExecutor",
             warnings=warnings,
@@ -125,7 +129,7 @@ async def email_extraction_workflow(message: WorkflowInput) -> EmailExtractionRe
             warnings=warnings,
             stopped_after="ScopeAreaMatchingExecutor",
         )
-    valid_assignments = await validate_assignments(assignments, services.settings)
+    valid_assignments = await validate_assignments(assignments, services.settings, request)
     status = (
         ExtractionStatus.TASKS_READY if valid_assignments else ExtractionStatus.NO_PROJECT_MATCH
     )
@@ -139,6 +143,7 @@ async def email_extraction_workflow(message: WorkflowInput) -> EmailExtractionRe
         status=status,
         task_candidate_count=len(tasks),
         project_match=project_score.result,
+        project_candidates=project_score.candidate_results,
         assignments=valid_assignments,
         stopped_after=stopped_after,
         warnings=warnings,
@@ -154,12 +159,13 @@ async def _build_assignments(
     project = project_score.project
     assignments: list[ExtractedTaskAssignment] = []
     thread_context = await services.task_history_client.get_thread_context(request)
+    used_multi_task_assignees: set[str] = set()
 
     for task in tasks:
         scored_project = project
         try:
             scored_project = await _apply_scope_search_scores(
-                request, services, project, task.description
+                request, services, project, task_context_text(request.body_text, task.description)
             )
         except ProjectSearchUnavailable:
             if services.project_search_client:
@@ -168,7 +174,28 @@ async def _build_assignments(
         scope, scope_confidence, scope_evidence = await match_scope_area(
             task, scored_project, thread_context
         )
+        if services.scope_reranker:
+            scope, scope_confidence, scope_evidence = await services.scope_reranker.rerank_scope(
+                request,
+                task,
+                scored_project,
+                scope,
+                scope_confidence,
+                scope_evidence,
+            )
         assignees = await resolve_assignees(request, task, scored_project)
+        if services.assignee_reranker:
+            assignees = await services.assignee_reranker.rerank_assignees(
+                request,
+                task,
+                scored_project,
+                assignees,
+            )
+        assignees = _normalize_assignees_for_task(
+            task, assignees, len(tasks), used_multi_task_assignees
+        )
+        if len(tasks) > 1 and len(assignees) == 1:
+            used_multi_task_assignees.add(assignees[0][0].email)
         due_date, due_confidence, due_evidence = await normalize_due_date(request, task)
 
         for person, assignee_confidence, assignee_evidence in assignees:
@@ -208,6 +235,68 @@ async def _build_assignments(
             )
 
     return assignments
+
+
+def _normalize_assignees_for_task(
+    task: ExtractedTaskCandidate,
+    assignees: list[tuple[AssociatedPerson, float, list[str]]],
+    task_count: int,
+    used_assignee_emails: set[str] | None = None,
+) -> list[tuple[AssociatedPerson, float, list[str]]]:
+    if task_count <= 1 or len(assignees) <= 1:
+        return assignees
+
+    used_assignee_emails = used_assignee_emails or set()
+    task_text = " ".join([task.title, task.description, *task.mentioned_people]).lower()
+    strongly_tied = [
+        assignee
+        for assignee in assignees
+        if _assignee_has_task_specific_evidence(task_text, assignee)
+    ]
+    unused = [assignee for assignee in assignees if assignee[0].email not in used_assignee_emails]
+    selected = strongly_tied or unused or assignees[:1]
+    return [
+        (
+            person,
+            confidence,
+            sorted({*evidence, "multi_task_assignee_normalized"}),
+        )
+        for person, confidence, evidence in selected[:1]
+    ]
+
+
+def _assignee_has_task_specific_evidence(
+    task_text: str,
+    assignee: tuple[AssociatedPerson, float, list[str]],
+) -> bool:
+    person, confidence, evidence = assignee
+    evidence_set = set(evidence)
+    strong_evidence = {
+        "direct_address_assignment",
+        "delegated_assignment_language",
+        "need_named_person_to_act",
+        "requested_actor_assignment_language",
+        "named_owner_drive_assignment",
+        "modal_named_actor_assignment",
+        "named_person_action_language",
+        "same_block_generic_request_at_mention",
+        "subject_matter_owner_signal",
+        "beneficiary_or_owner_signal",
+        "named_request_actor_signal",
+    }
+    if evidence_set & strong_evidence and confidence >= 0.88:
+        return True
+
+    person_refs = [person.name.lower(), person.email.lower()]
+    if person.aliases:
+        person_refs.extend(alias.strip().lower() for alias in person.aliases.split(","))
+    if any(ref and ref in task_text for ref in person_refs):
+        return True
+    if person.name:
+        first_name = person.name.split()[0].lower()
+        if len(first_name) > 2 and first_name in task_text:
+            return True
+    return False
 
 
 async def _retrieve_projects(
@@ -304,6 +393,7 @@ def _response(
     assignments: list[ExtractedTaskAssignment],
     stopped_after: str | None,
     warnings: list[str],
+    project_candidates: list[ProjectMatchResult] | None = None,
 ) -> EmailExtractionResponse:
     task_info = getattr(services.task_extractor, "last_run_info", None)
     return EmailExtractionResponse(
@@ -335,6 +425,7 @@ def _response(
             if services.project_search_client and assignments
             else 0,
             projectScoring=_project_scoring_diagnostics(project_match),
+            projectCandidateScores=(project_candidates or [])[:10],
             stoppedAfter=stopped_after,
             warnings=warnings,
         ),
@@ -397,6 +488,7 @@ def _project_scoring_diagnostics(
         searchMargin=project_match.search_margin,
         participantScore=project_match.participant_score,
         peopleContextScore=project_match.people_context_score,
+        clientDomainScore=project_match.client_domain_score,
         lexicalScore=project_match.lexical_score,
         threshold=project_match.threshold,
         decisionReason=project_match.decision_reason,

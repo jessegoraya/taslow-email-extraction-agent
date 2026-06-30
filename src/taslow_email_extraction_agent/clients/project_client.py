@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Protocol
+from urllib.parse import urlparse
 
 import httpx
 
@@ -46,6 +47,8 @@ class HttpProjectClient:
     def __init__(self, base_url: str, api_key: str | None = None) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
+        host = urlparse(self._base_url).netloc.lower()
+        self._path_prefix = "/api" if host.endswith("azurewebsites.net") else ""
 
     async def get_active_projects(self, tenant_id: str) -> list[ProjectContext]:
         headers = {}
@@ -54,7 +57,7 @@ class HttpProjectClient:
 
         async with httpx.AsyncClient(timeout=20.0) as client:
             response = await client.get(
-                f"{self._base_url}/api/projects/active/{tenant_id}",
+                self._url(f"/projects/active/{tenant_id}"),
                 headers=headers,
             )
             response.raise_for_status()
@@ -74,7 +77,7 @@ class HttpProjectClient:
 
         async with httpx.AsyncClient(timeout=20.0) as client:
             response = await client.get(
-                f"{self._base_url}/api/projects/{tenant_id}/{project_id}/detail",
+                self._url(f"/projects/{tenant_id}/{project_id}/detail"),
                 headers=headers,
             )
             if response.status_code == 404:
@@ -104,7 +107,7 @@ class HttpProjectClient:
 
         async with httpx.AsyncClient(timeout=20.0) as client:
             response = await client.post(
-                f"{self._base_url}/api/internal/projects/agent-context/batch",
+                self._url("/internal/projects/agent-context/batch"),
                 headers=headers,
                 json=payload,
             )
@@ -161,6 +164,7 @@ class HttpProjectClient:
             or row.get("description")
             or "",
             descVector=row.get("DescVector") or row.get("descVector") or [],
+            clientDomains=row.get("ClientDomains") or row.get("clientDomains") or [],
             associatedPeople=people,
             associatedManagers=managers,
             scopes=scopes,
@@ -175,3 +179,6 @@ class HttpProjectClient:
             email=row.get("PersonEmail") or row.get("email") or "",
             role=row.get("Role") or row.get("role") or "",
         )
+
+    def _url(self, path: str) -> str:
+        return f"{self._base_url}{self._path_prefix}{path}"

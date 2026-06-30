@@ -10,7 +10,11 @@ import httpx
 from taslow_email_extraction_agent.agent_framework_compat import step
 from taslow_email_extraction_agent.config import Settings
 from taslow_email_extraction_agent.models import EmailExtractionRequest, ExtractedTaskCandidate
-from taslow_email_extraction_agent.text_utils import token_set
+from taslow_email_extraction_agent.text_utils import (
+    has_forwarded_actionable_handoff,
+    split_newest_and_quoted_text,
+    token_set,
+)
 
 TASK_VERBS = [
     "please",
@@ -32,7 +36,41 @@ TASK_VERBS = [
     "provide",
     "complete",
     "draft",
+    "can someone",
+    "could someone",
+    "would someone",
+    "someone needs to",
+    "does anyone know",
+    "could anyone tell me",
+    "is there anyone who can",
+    "would anyone be willing to",
+    "is it possible for someone to",
+    "may i ask someone to",
+    "would it be possible for anyone to",
+    "open item",
+    "remaining gap",
+    "still outstanding",
+    "yours to drive",
+    "at risk of slipping",
 ]
+
+GENERIC_REQUEST_RE = re.compile(
+    r"\b(?:can\s+someone|could\s+someone|would\s+someone|someone\s+needs\s+to|"
+    r"does\s+anyone\s+know|could\s+anyone\s+tell\s+me|"
+    r"is\s+there\s+anyone\s+who\s+can|would\s+anyone\s+be\s+willing\s+to|"
+    r"is\s+it\s+possible\s+for\s+someone\s+to|may\s+i\s+ask\s+someone\s+to|"
+    r"would\s+it\s+be\s+possible\s+for\s+anyone\s+to)\b",
+    re.IGNORECASE,
+)
+
+ACTIONABLE_OUTCOME_RE = re.compile(
+    r"\b(?:send|update|confirm|schedule|review|complete|deliver|follow\s+up|"
+    r"provide|prepare|draft|create|revise|reconcile|resolve|check|validate|"
+    r"verify|investigate|analy[sz]e|clean\s+up|coordinate|brief|upload|"
+    r"attach|share|route|submit|approve|close|fix|tell\s+me|let\s+me\s+know|"
+    r"answer|get\b.{0,40}\bdone)\b",
+    re.IGNORECASE,
+)
 
 MENTION_RE = re.compile(r"(?<!\w)@?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)")
 DUE_RE = re.compile(
@@ -75,6 +113,8 @@ class HeuristicTaskExtractor:
             if lower.startswith(("thanks", "thank you", "fyi")):
                 continue
             if not any(verb in lower for verb in TASK_VERBS):
+                continue
+            if GENERIC_REQUEST_RE.search(sentence) and not ACTIONABLE_OUTCOME_RE.search(sentence):
                 continue
 
             title = self._title_from_sentence(sentence)
@@ -234,6 +274,22 @@ Do not create tasks from stale quoted or forwarded content unless the newest mes
 the recipient to act on it. Return an empty tasks array for informational updates, meeting
 logistics, status-only updates, approvals without a requested action, cancellation/retraction
 language, or work that is already handled.
+For forwarded actionable handoffs, the newest authored message controls whether work is assigned
+and who is being asked to act, while the forwarded/original message may supply the task details,
+Project context, Scope context, due date, and client rationale. Example: if the newest note says
+"Jesse, can you handle this request below?", create the task from the forwarded client request and
+preserve that context in the task description; do not assign based on the original client's
+generic "can someone" wording.
+Implicit business-risk language can still be a task even without "please" or "can you" wording.
+Create a task when the newest message clearly implies work is needed, such as:
+- a log, tracker, dashboard, access queue, or record has not been updated and should be corrected;
+- overlapping bookings, schedules, or calendar windows will cause a conflict if not resolved;
+- someone wants or requested a write-up, summary, retrospective, deck, evidence package, or updated
+  document;
+- a stale queue, stuck approval, missing evidence, or outdated charter/process document needs to be
+  cleared, refreshed, or resolved.
+- phrases such as "open item", "remaining gap", "still outstanding", "this is yours to drive",
+  or "at risk of slipping" identify unresolved work with an accountable actor or concrete outcome.
 Create one task per distinct requested business outcome, not one task per sentence, clause, noun,
 or supporting detail. If several clauses all support the same outcome, return one task with the
 combined context. Extract multiple tasks only when the email clearly assigns separate outcomes that
@@ -242,9 +298,18 @@ Do not invent projects, assignees, due dates, or facts not present in the email.
 
 
 def _request_prompt_payload(request: EmailExtractionRequest) -> dict:
+    newest_body, quoted_context = split_newest_and_quoted_text(request.body_text)
+    handoff = has_forwarded_actionable_handoff(request.body_text)
     return {
         "subject": request.subject,
         "bodyText": request.body_text,
+        "newestAuthoredText": newest_body,
+        "forwardedContextText": quoted_context if handoff else "",
+        "forwardedActionableHandoff": handoff,
+        "forwardedHandoffPolicy": (
+            "If forwardedActionableHandoff is true, extract the work item from the forwarded "
+            "context but use the newest authored message to determine current assignment intent."
+        ),
         "sentDateTime": request.sent_date_time.isoformat() if request.sent_date_time else None,
         "direction": request.direction,
         "from": request.from_participant.model_dump() if request.from_participant else None,

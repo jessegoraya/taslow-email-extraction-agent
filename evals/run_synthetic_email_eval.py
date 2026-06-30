@@ -11,10 +11,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from taslow_email_extraction_agent.clients.project_client import InMemoryProjectClient
+from taslow_email_extraction_agent.clients.project_client import HttpProjectClient, InMemoryProjectClient
 from taslow_email_extraction_agent.clients.project_search_client import AzureProjectSearchClient
 from taslow_email_extraction_agent.clients.task_history_client import InMemoryTaskHistoryClient
 from taslow_email_extraction_agent.config import Settings
+from taslow_email_extraction_agent.executors.reranking import (
+    FoundryAssigneeReranker,
+    FoundryScopeReranker,
+    NoOpAssigneeReranker,
+    NoOpScopeReranker,
+)
 from taslow_email_extraction_agent.executors.task_detection import FoundryTaskExtractor
 from taslow_email_extraction_agent.models import (
     AssociatedPerson,
@@ -37,6 +43,7 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--run-label", default="local-eval")
     parser.add_argument("--env-file", type=Path, default=Path(".env"))
+    parser.add_argument("--project-service-base-url")
     args = parser.parse_args()
 
     asyncio.run(run_eval(args))
@@ -44,6 +51,8 @@ def main() -> None:
 
 async def run_eval(args: argparse.Namespace) -> None:
     _load_env_file(args.env_file)
+    if args.project_service_base_url:
+        os.environ["PROJECT_SERVICE_BASE_URL"] = args.project_service_base_url
     run_id = datetime.now().strftime(f"%Y%m%d-%H%M%S-{args.run_label}")
     run_dir = args.results_root / run_id
     failures_dir = run_dir / "failures"
@@ -59,14 +68,25 @@ async def run_eval(args: argparse.Namespace) -> None:
 
     settings = Settings()
     projects = _load_projects(args.project_context) if args.project_context else []
+    project_client = (
+        InMemoryProjectClient(projects)
+        if args.project_context
+        else HttpProjectClient(settings.project_service_base_url or "", settings.taslow_service_api_key)
+    )
     services = WorkflowServices(
         settings=settings,
         task_extractor=FoundryTaskExtractor(settings),
-        project_client=InMemoryProjectClient(projects),
+        project_client=project_client,
         task_history_client=InMemoryTaskHistoryClient(),
         project_search_client=AzureProjectSearchClient(settings)
         if settings.project_search_provider in {"azure-ai-search", "shadow"}
         else None,
+        assignee_reranker=FoundryAssigneeReranker(settings)
+        if settings.agent_assignee_reranker_enabled
+        else NoOpAssigneeReranker(),
+        scope_reranker=FoundryScopeReranker(settings)
+        if settings.agent_scope_reranker_enabled
+        else NoOpScopeReranker(),
     )
 
     manifest = {
@@ -97,6 +117,7 @@ async def run_eval(args: argparse.Namespace) -> None:
         selected_lines,
         run_id,
         args.answer_key,
+        projects,
     )
     _write_json(run_dir / "scoring_summary.json", summary)
     _write_jsonl(run_dir / "scoring_details.jsonl", details)
@@ -151,6 +172,7 @@ def _score_rows(
     selected_lines: list[int],
     run_id: str,
     answer_key_path: Path,
+    projects: list[ProjectContext] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]], dict[str, list[dict[str, Any]]]]:
     details: list[dict[str, Any]] = []
     by_scenario: dict[str, dict[str, Any]] = defaultdict(
@@ -160,6 +182,8 @@ def _score_rows(
     failure_buckets: dict[str, list[dict[str, Any]]] = defaultdict(list)
     status_counter: Counter[str] = Counter()
     fallback_counter: Counter[str] = Counter()
+    review_flag_counter: Counter[str] = Counter()
+    project_people_by_id = _project_people_by_id(projects or [])
 
     for raw in raw_rows:
         response = raw.get("response") or {}
@@ -173,7 +197,7 @@ def _score_rows(
             scenario = "UNKNOWN"
             sub = None
         else:
-            score = _score_one(raw, answer)
+            score = _score_one(raw, answer, project_people_by_id)
             scenario = answer.get("scenarioId") or "UNKNOWN"
             sub = answer.get("subScenarioId")
         detail = {
@@ -193,6 +217,8 @@ def _score_rows(
             by_sub[sub]["passed" if score["passed"] else "failed"] += 1
         for failure in score["failures"]:
             failure_buckets[failure].append(detail)
+        for flag in score.get("reviewFlags", []):
+            review_flag_counter[flag] += 1
 
     passed = sum(1 for detail in details if detail["passed"])
     for bucket in [*by_scenario.values(), *by_sub.values()]:
@@ -213,11 +239,16 @@ def _score_rows(
         "byScenario": dict(sorted(by_scenario.items())),
         "bySubScenario": dict(sorted(by_sub.items())),
         "failureCounts": {key: len(value) for key, value in sorted(failure_buckets.items())},
+        "reviewFlagCounts": dict(sorted(review_flag_counter.items())),
     }
     return summary, details, failure_buckets
 
 
-def _score_one(raw_row: dict[str, Any], answer: dict[str, Any]) -> dict[str, Any]:
+def _score_one(
+    raw_row: dict[str, Any],
+    answer: dict[str, Any],
+    project_people_by_id: dict[str, set[str]] | None = None,
+) -> dict[str, Any]:
     response = raw_row["response"]
     actual_status = _normalize_status(response.get("status"))
     expected_status = _normalize_status(answer.get("expectedStatus"))
@@ -248,7 +279,14 @@ def _score_one(raw_row: dict[str, Any], answer: dict[str, Any]) -> dict[str, Any
     )
 
     failures: list[str] = []
-    if expected_status and actual_status != expected_status:
+    review_flags: list[str] = []
+    expected_assignee_policy_flags = _expected_assignee_policy_flags(
+        answer,
+        expected_assignees,
+        project_people_by_id or {},
+    )
+    review_flags.extend(expected_assignee_policy_flags)
+    if expected_status and not _status_matches(expected_status, actual_status, answer):
         failures.append("status")
     if len(actual_tasks) != int(expected_count or 0):
         failures.append("task_count")
@@ -257,7 +295,10 @@ def _score_one(raw_row: dict[str, Any], answer: dict[str, Any]) -> dict[str, Any
         and expected_status == "tasks_ready"
         and project_match.get("projectId") != answer.get("expectedProjectId")
     ):
-        failures.append("project")
+        if _same_project_name_different_id(answer, project_match):
+            review_flags.append("same_project_name_different_project_id")
+        else:
+            failures.append("project")
     if (
         answer.get("expectedScopeId")
         and expected_status == "tasks_ready"
@@ -269,13 +310,17 @@ def _score_one(raw_row: dict[str, Any], answer: dict[str, Any]) -> dict[str, Any
         and expected_status == "tasks_ready"
         and not expected_assignees.issubset(actual_assignees)
     ):
-        failures.append("assignee")
+        if expected_assignee_policy_flags:
+            review_flags.append("assignee_mismatch_policy_review_excluded")
+        else:
+            failures.append("assignee")
     if expected_due_present and expected_status == "tasks_ready" and not actual_due_dates:
         failures.append("due_date")
 
     return {
         "passed": not failures,
         "failures": failures,
+        "reviewFlags": review_flags,
         "actualStatus": actual_status,
         "expectedStatus": expected_status,
         "actualTaskCount": len(actual_tasks),
@@ -283,6 +328,79 @@ def _score_one(raw_row: dict[str, Any], answer: dict[str, Any]) -> dict[str, Any
         "actualProjectId": project_match.get("projectId"),
         "expectedProjectId": answer.get("expectedProjectId"),
     }
+
+
+def _same_project_name_different_id(
+    answer: dict[str, Any],
+    project_match: dict[str, Any],
+) -> bool:
+    expected_id = answer.get("expectedProjectId")
+    actual_id = project_match.get("projectId")
+    if not expected_id or not actual_id or expected_id == actual_id:
+        return False
+    expected_name = answer.get("expectedProjectName")
+    actual_name = project_match.get("projectName")
+    if not expected_name or not actual_name:
+        return False
+    return _normalized_project_name(expected_name) == _normalized_project_name(actual_name)
+
+
+def _expected_assignee_policy_flags(
+    answer: dict[str, Any],
+    expected_assignees: set[str],
+    project_people_by_id: dict[str, set[str]],
+) -> list[str]:
+    flags: list[str] = []
+    if not expected_assignees:
+        return flags
+
+    if answer.get("subScenarioId") == "UNKNOWN_ASSIGNEE":
+        flags.append("unknown_assignee_expected_assignment_policy_review")
+
+    if any(_is_external_expected_assignee(email) for email in expected_assignees):
+        flags.append("external_expected_assignee_policy_review")
+
+    expected_project_id = answer.get("expectedProjectId")
+    project_people = project_people_by_id.get(expected_project_id or "")
+    if project_people is not None:
+        outside_project = sorted(
+            email for email in expected_assignees if email not in project_people
+        )
+        if outside_project:
+            flags.append("expected_assignee_not_project_associated")
+
+    return sorted(set(flags))
+
+
+def _is_external_expected_assignee(email: str) -> bool:
+    domain = email.rsplit("@", 1)[1].lower() if "@" in email else ""
+    return bool(domain and domain not in {"taslow.com", "acme.com", "acme-consulting.example"})
+
+
+def _project_people_by_id(projects: list[ProjectContext]) -> dict[str, set[str]]:
+    return {
+        project.project_id: {person.email for person in project.people if person.email}
+        for project in projects
+    }
+
+
+def _normalized_project_name(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", value.lower())
+
+
+def _status_matches(expected_status: str, actual_status: str, answer: dict[str, Any]) -> bool:
+    if actual_status == expected_status:
+        return True
+    is_s5_informational = (
+        answer.get("scenarioId") == "S5_NON_TASLOW_INFORMATIONAL_NO_TASK"
+        and not answer.get("shouldCreateTaslowTask")
+        and int(answer.get("expectedTaskCount") or 0) == 0
+    )
+    return (
+        is_s5_informational
+        and expected_status == "no_project_match"
+        and actual_status == "no_task_found"
+    )
 
 
 def _usage_summary(raw_rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -342,8 +460,19 @@ def _find_answer(
     return None
 
 
-def _email_keys(row: dict[str, Any]) -> set[str]:
-    keys = set()
+def _email_keys(row: dict[str, Any]) -> list[str]:
+    keys: list[str] = []
+    seen: set[str] = set()
+
+    def add(value: object) -> None:
+        if not value:
+            return
+        key = str(value)
+        if key in seen:
+            return
+        keys.append(key)
+        seen.add(key)
+
     for field in [
         "emailId",
         "graphEventId",
@@ -355,28 +484,45 @@ def _email_keys(row: dict[str, Any]) -> set[str]:
         value = row.get(field)
         if not value:
             continue
-        keys.add(str(value))
+        add(value)
+
+    for field in [
+        "emailId",
+        "graphEventId",
+        "messageId",
+        "internetMessageId",
+        "idempotencyKey",
+        "correlationId",
+    ]:
+        value = row.get(field)
+        if not value:
+            continue
         match = re.search(r"(\d{3,6})", str(value))
         if match:
             number = int(match.group(1))
-            keys.update(
-                {
-                    str(number),
-                    f"{number:06d}",
-                    f"synthetic-email-{number:06d}",
-                    f"synthetic-email-{number:03d}",
-                    f"email-{number:06d}",
-                }
-            )
+            add(str(number))
+            add(f"{number:06d}")
+            add(f"synthetic-email-{number:06d}")
+            add(f"synthetic-email-{number:03d}")
+            add(f"synthetic-message-{number:06d}")
+            add(f"synthetic-message-{number:03d}")
+            add(f"email-{number:06d}")
+
     if row.get("sourceLine"):
         number = int(row["sourceLine"])
-        keys.update({str(number), f"{number:06d}", f"synthetic-email-{number:06d}"})
+        add(str(number))
+        add(f"{number:06d}")
+        add(f"synthetic-email-{number:06d}")
     return keys
 
 
 def _load_projects(path: Path) -> list[ProjectContext]:
     payload = json.loads(path.read_text(encoding="utf-8-sig"))
     projects = []
+    for row in payload.get("projects", []):
+        project = _map_project(row)
+        if project.project_id:
+            projects.append(project)
     for tenant in payload.get("tenants", []):
         for row in tenant.get("projects", []):
             project = _map_project(row)
@@ -392,6 +538,7 @@ def _map_project(row: dict[str, Any]) -> ProjectContext:
         description=_text_value(
             _first(row, "description", "ProjectDescription", "projectDescription")
         ),
+        clientDomains=_first(row, "clientDomains", "ClientDomains") or [],
         associatedPeople=[
             _map_person(person)
             for person in (_first(row, "AssociatedPeople", "associatedPeople") or [])
