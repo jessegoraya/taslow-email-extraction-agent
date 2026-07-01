@@ -9,11 +9,17 @@ from taslow_email_extraction_agent.clients.task_history_client import InMemoryTa
 from taslow_email_extraction_agent.models import (
     AssociatedPerson,
     EmailExtractionRequest,
+    ExtractedTaskAssignment,
     ExtractedTaskCandidate,
     ExtractionStatus,
     Participant,
 )
-from taslow_email_extraction_agent.workflow import _normalize_assignees_for_task, run_email_extraction
+from taslow_email_extraction_agent.workflow import (
+    _apply_ordered_multi_task_recipient,
+    _normalize_assignees_for_task,
+    _rewrite_ordered_multi_task_assignments,
+    run_email_extraction,
+)
 
 
 async def test_extracts_project_task(base_request, services):
@@ -208,6 +214,68 @@ def test_multi_task_assignee_normalization_uses_unused_fallback_recipient():
     assert "multi_task_assignee_normalized" in normalized[0][2]
 
 
+def test_ordered_multi_task_recipient_pairs_task_to_to_order(base_request, project):
+    task = ExtractedTaskCandidate(
+        sourceTaskId="extracted-task-2",
+        title="Stage patient kiosk units",
+        description="Stage patient kiosk units and verify the check-in firmware build.",
+        mentionedPeople=[],
+        dueText=None,
+        confidence=0.90,
+        evidence=["explicit_task_language"],
+    )
+    base_request.to = [
+        Participant(email="tessa@tenant.com", name="Tessa"),
+        Participant(email="jesse@tenant.com", name="Jesse"),
+    ]
+    assignees = [
+        (
+            project.people[0],
+            0.85,
+            ["recipient_overlap"],
+        )
+    ]
+
+    selected = _apply_ordered_multi_task_recipient(
+        base_request,
+        project,
+        task,
+        assignees,
+        task_index=1,
+        task_count=2,
+    )
+
+    assert len(selected) == 1
+    assert selected[0][0].email == "jesse@tenant.com"
+    assert "ordered_multi_task_recipient_assignment" in selected[0][2]
+
+
+def test_ordered_multi_task_assignment_rewrite_fixes_reused_fallback_assignee(
+    base_request, project
+):
+    base_request.to = [
+        Participant(email="tessa@tenant.com", name="Tessa"),
+        Participant(email="jesse@tenant.com", name="Jesse"),
+    ]
+    assignments = [
+        _assignment("task-1", "Task one", "tessa@tenant.com", "Tessa"),
+        _assignment("task-2", "Task two", "tessa@tenant.com", "Tessa"),
+    ]
+
+    rewritten = _rewrite_ordered_multi_task_assignments(
+        base_request,
+        project,
+        assignments,
+        task_count=2,
+    )
+
+    assert [assignment.assignee_email for assignment in rewritten] == [
+        "tessa@tenant.com",
+        "jesse@tenant.com",
+    ]
+    assert "ordered_multi_task_recipient_assignment" in rewritten[1].evidence
+
+
 class FakeProjectSearchClient:
     async def search_projects(self, tenant_id: str, query_text: str) -> list[SearchCandidate]:
         return [
@@ -255,3 +323,27 @@ class CapturingScopeSearchClient(FakeProjectSearchClient):
     ) -> list[SearchCandidate]:
         self.scope_queries.append(query_text)
         return await super().search_scopes(tenant_id, project_id, query_text)
+
+
+def _assignment(
+    source_task_id: str,
+    title: str,
+    assignee_email: str,
+    assignee_name: str,
+) -> ExtractedTaskAssignment:
+    return ExtractedTaskAssignment(
+        sourceTaskId=source_task_id,
+        title=title,
+        description=title,
+        projectId="project-1",
+        scopeId="scope-1",
+        scopeConfidence=0.90,
+        assigneeEmail=assignee_email,
+        assigneeName=assignee_name,
+        assigneeConfidence=0.85,
+        dueDate=None,
+        dueDateConfidence=None,
+        overallConfidence=0.85,
+        evidence=["recipient_overlap", "multi_task_assignee_normalized"],
+        needsReview=False,
+    )

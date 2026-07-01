@@ -161,7 +161,7 @@ async def _build_assignments(
     thread_context = await services.task_history_client.get_thread_context(request)
     used_multi_task_assignees: set[str] = set()
 
-    for task in tasks:
+    for task_index, task in enumerate(tasks):
         scored_project = project
         try:
             scored_project = await _apply_scope_search_scores(
@@ -191,6 +191,14 @@ async def _build_assignments(
                 scored_project,
                 assignees,
             )
+        assignees = _apply_ordered_multi_task_recipient(
+            request,
+            scored_project,
+            task,
+            assignees,
+            task_index,
+            len(tasks),
+        )
         assignees = _normalize_assignees_for_task(
             task, assignees, len(tasks), used_multi_task_assignees
         )
@@ -234,7 +242,123 @@ async def _build_assignments(
                 )
             )
 
-    return assignments
+    return _rewrite_ordered_multi_task_assignments(request, project, assignments, len(tasks))
+
+
+def _apply_ordered_multi_task_recipient(
+    request: EmailExtractionRequest,
+    project,
+    task: ExtractedTaskCandidate,
+    assignees: list[tuple[AssociatedPerson, float, list[str]]],
+    task_index: int,
+    task_count: int,
+) -> list[tuple[AssociatedPerson, float, list[str]]]:
+    if task_count <= 1 or task_index >= len(request.to):
+        return assignees
+    if len(request.to) < task_count:
+        return assignees
+
+    task_text = " ".join([task.title, task.description]).lower()
+    if any("sender_self_ownership_signal" in evidence for _p, _s, evidence in assignees):
+        return assignees
+
+    project_people_by_email = {person.email: person for person in project.people if person.email}
+    if any(_task_text_mentions_person(task_text, person) for person in project_people_by_email.values()):
+        return assignees
+
+    recipient = request.to[task_index]
+    person = project_people_by_email.get(recipient.email)
+    if not person:
+        return assignees
+
+    existing = next(
+        (assignee for assignee in assignees if assignee[0].email == person.email),
+        None,
+    )
+    if existing:
+        _person, confidence, evidence = existing
+        return [
+            (
+                person,
+                max(confidence, 0.89),
+                sorted(
+                    {
+                        *evidence,
+                        "ordered_multi_task_recipient_assignment",
+                    }
+                ),
+            )
+        ]
+    return [
+        (
+            person,
+            0.89,
+            ["ordered_multi_task_recipient_assignment"],
+        )
+    ]
+
+
+def _rewrite_ordered_multi_task_assignments(
+    request: EmailExtractionRequest,
+    project,
+    assignments: list[ExtractedTaskAssignment],
+    task_count: int,
+) -> list[ExtractedTaskAssignment]:
+    if task_count <= 1 or len(assignments) <= 1:
+        return assignments
+    if len(request.to) < len(assignments):
+        return assignments
+
+    project_people_by_email = {person.email: person for person in project.people if person.email}
+    ordered_people = [
+        project_people_by_email.get(recipient.email)
+        for recipient in request.to[: len(assignments)]
+    ]
+    if any(person is None for person in ordered_people):
+        return assignments
+
+    rewritten: list[ExtractedTaskAssignment] = []
+    for index, assignment in enumerate(assignments):
+        if _assignment_has_strong_assignee_evidence(assignment):
+            rewritten.append(assignment)
+            continue
+        person = ordered_people[index]
+        assert person is not None
+        rewritten.append(
+            assignment.model_copy(
+                update={
+                    "assignee_email": person.email,
+                    "assignee_name": person.name,
+                    "assignee_confidence": max(assignment.assignee_confidence, 0.89),
+                    "evidence": sorted(
+                        {
+                            *assignment.evidence,
+                            "ordered_multi_task_recipient_assignment",
+                            "multi_task_assignee_normalized",
+                        }
+                    ),
+                    "needs_review": False,
+                }
+            )
+        )
+    return rewritten
+
+
+def _assignment_has_strong_assignee_evidence(assignment: ExtractedTaskAssignment) -> bool:
+    strong_evidence = {
+        "direct_address_assignment",
+        "delegated_assignment_language",
+        "need_named_person_to_act",
+        "requested_actor_assignment_language",
+        "named_owner_drive_assignment",
+        "modal_named_actor_assignment",
+        "same_block_generic_request_at_mention",
+        "subject_matter_owner_signal",
+        "beneficiary_or_owner_signal",
+        "named_request_actor_signal",
+        "sender_self_ownership_signal",
+    }
+    return bool(strong_evidence & set(assignment.evidence))
 
 
 def _normalize_assignees_for_task(
@@ -287,6 +411,10 @@ def _assignee_has_task_specific_evidence(
     if evidence_set & strong_evidence and confidence >= 0.88:
         return True
 
+    return _task_text_mentions_person(task_text, person)
+
+
+def _task_text_mentions_person(task_text: str, person: AssociatedPerson) -> bool:
     person_refs = [person.name.lower(), person.email.lower()]
     if person.aliases:
         person_refs.extend(alias.strip().lower() for alias in person.aliases.split(","))
