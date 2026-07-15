@@ -1,0 +1,88 @@
+name: email-agent-ci-$(Date:yyyyMMdd).$(Rev:r)
+
+trigger:
+  batch: true
+  branches:
+    include:
+      - main
+
+pr:
+  autoCancel: true
+  branches:
+    include:
+      - main
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+  - checkout: self
+    fetchDepth: 0
+
+  - task: UsePythonVersion@0
+    inputs:
+      versionSpec: '3.12'
+    displayName: Use Python 3.12
+
+  - script: python -m pip install --upgrade pip "setuptools>=83" wheel
+    displayName: Upgrade Python build tools
+
+  - script: python -m pip install -e .[dev]
+    displayName: Install agent and test dependencies
+
+  - script: python -m ruff check .
+    displayName: Lint agent source
+
+  - script: >-
+      python -m pytest
+      --junitxml=$(Agent.TempDirectory)/agent-tests.xml
+      --cov=taslow_email_extraction_agent
+      --cov-report=xml:$(Agent.TempDirectory)/agent-coverage.xml
+    displayName: Run agent tests and coverage
+
+  - task: PublishTestResults@2
+    condition: always()
+    inputs:
+      testResultsFormat: JUnit
+      testResultsFiles: '$(Agent.TempDirectory)/agent-tests.xml'
+      testRunTitle: Taslow email extraction agent
+      failTaskOnFailedTests: true
+
+  - task: PublishCodeCoverageResults@2
+    condition: succeededOrFailed()
+    inputs:
+      summaryFileLocation: '$(Agent.TempDirectory)/agent-coverage.xml'
+
+  - script: python -m pip_audit --skip-editable
+    displayName: Audit Python dependencies
+
+  - script: python -m build
+    displayName: Build wheel and source distribution
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+
+  - pwsh: |
+      Copy-Item RELEASE_NOTES.md dist
+      $files = Get-ChildItem dist -File | Where-Object Name -ne RELEASE_NOTES.md | ForEach-Object {
+        [ordered]@{
+          name = $_.Name
+          sha256 = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          sizeBytes = $_.Length
+        }
+      }
+      [ordered]@{
+        schemaVersion = "1.0"
+        component = "taslow-email-extraction-agent"
+        repository = "jessegoraya/taslow-email-extraction-agent"
+        sourceCommit = "$(Build.SourceVersion)"
+        buildId = "$(Build.BuildId)"
+        files = @($files)
+      } | ConvertTo-Json -Depth 6 | Set-Content dist/artifact-manifest.json
+    displayName: Generate immutable agent artifact manifest
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+
+  - task: PublishPipelineArtifact@1
+    displayName: Publish immutable agent artifact
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+    inputs:
+      targetPath: dist
+      artifact: email-extraction-agent

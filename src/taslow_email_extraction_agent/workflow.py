@@ -263,7 +263,9 @@ def _apply_ordered_multi_task_recipient(
         return assignees
 
     project_people_by_email = {person.email: person for person in project.people if person.email}
-    if any(_task_text_mentions_person(task_text, person) for person in project_people_by_email.values()):
+    if any(
+        _task_text_mentions_person(task_text, person) for person in project_people_by_email.values()
+    ):
         return assignees
 
     recipient = request.to[task_index]
@@ -311,8 +313,7 @@ def _rewrite_ordered_multi_task_assignments(
 
     project_people_by_email = {person.email: person for person in project.people if person.email}
     ordered_people = [
-        project_people_by_email.get(recipient.email)
-        for recipient in request.to[: len(assignments)]
+        project_people_by_email.get(recipient.email) for recipient in request.to[: len(assignments)]
     ]
     if any(person is None for person in ordered_people):
         return assignments

@@ -574,7 +574,7 @@ def _has_subject_matter_owner_signal(text: str, person: AssociatedPerson) -> boo
         )
         reverse_pattern = (
             r"\b(?:flagged|noticed|thinks|believes|found|identified)\b"
-            rf".{0,40}\b{re.escape(reference)}(?:'s)?\b"
+            rf".{0, 40}\b{re.escape(reference)}(?:'s)?\b"
         )
         if re.search(pattern, text, re.IGNORECASE) or re.search(
             reverse_pattern,
@@ -594,9 +594,9 @@ def _has_beneficiary_or_owner_signal(text: str, person: AssociatedPerson) -> boo
             rf"\bconfirm\s+with\s+{reference_pattern}\b",
             rf"\bbrief\s+{reference_pattern}\b",
             rf"\bwalk\s+{reference_pattern}\b",
-            rf"\bresend\b.{0,60}\bto\s+{reference_pattern}\b",
-            rf"\bfor\s+{reference_pattern}\b.{0,80}\b(?:review|approval|sign[- ]off|use)\b",
-            rf"\b{reference_pattern}\b.{0,80}\b(?:has|needs|is\s+missing|is\s+working\s+from)\b",
+            rf"\bresend\b.{0, 60}\bto\s+{reference_pattern}\b",
+            rf"\bfor\s+{reference_pattern}\b.{0, 80}\b(?:review|approval|sign[- ]off|use)\b",
+            rf"\b{reference_pattern}\b.{0, 80}\b(?:has|needs|is\s+missing|is\s+working\s+from)\b",
         ]
         if any(re.search(pattern, text, re.IGNORECASE) for pattern in patterns):
             return True
@@ -615,7 +615,7 @@ def _has_named_request_actor_signal(text: str, person: AssociatedPerson) -> bool
             r"brief|walk|find|complete)\b"
         )
         loose_pattern = (
-            rf"\b(?:can|could|should|will)\s+{reference_pattern}\b.{0,80}"
+            rf"\b(?:can|could|should|will)\s+{reference_pattern}\b.{0, 80}"
             r"\b(?:confirm|check|review|update|send|handle|coordinate|reconcile|resolve|"
             r"brief|walk|find|complete)\b"
         )
@@ -637,13 +637,14 @@ def _is_context_reviewer_or_delivery_target_only(
     for reference in _person_reference_variants(person):
         reference_pattern = re.escape(reference)
         target_patterns = [
-            rf"\b(?:send|get|provide|share|forward|route|deliver|resend)\b.{0,100}"
+            rf"\b(?:send|get|provide|share|forward|route|deliver|resend)\b.{0, 100}"
             rf"\b(?:to|for)\s+{reference_pattern}\b",
-            rf"\b(?:send|get|provide|share|forward|route|deliver|resend)\b.{0,100}"
+            rf"\b(?:send|get|provide|share|forward|route|deliver|resend)\b.{0, 100}"
             rf"\bwith\s+{reference_pattern}\b",
-            rf"\bfor\s+{reference_pattern}\b.{0,80}\b(?:review|approval|awareness|records|use)\b",
+            rf"\bfor\s+{reference_pattern}\b.{0, 80}\b(?:review|approval|awareness|records|use)\b",
             rf"\b(?:wants?|would\s+like|asked|asks|needs?)\s+{reference_pattern}\s+to\s+review\b",
-            rf"\b{reference_pattern}\b.{0,60}\b(?:wants?|would\s+like|asked|asks|needs?)\s+to\s+review\b",
+            rf"\b{reference_pattern}\b.{0, 60}\b"
+            rf"(?:wants?|would\s+like|asked|asks|needs?)\s+to\s+review\b",
             rf"\b{reference_pattern}\b\s+mentioned\b(?![^.?!]{{0,120}}\b(?:he|she|they|him|her|them|working\s+from|owns?|owes|needs|is\s+missing|has\s+the\s+list)\b)",
         ]
         if include_coordination_targets:
@@ -651,7 +652,7 @@ def _is_context_reviewer_or_delivery_target_only(
                 rf"\b(?:confirm|coordinate|check|follow\s+up)\s+with\s+{reference_pattern}\b"
             )
         actor_patterns = [
-            rf"\b{reference_pattern}\b.{0,40}\b(?:can|could|should|will|needs?\s+to|"
+            rf"\b{reference_pattern}\b.{0, 40}\b(?:can|could|should|will|needs?\s+to|"
             r"update|prepare|send|coordinate|confirm|resolve|complete)\b",
             rf"\b(?:have|ask|tell|need)\s+{reference_pattern}\b",
             rf"\b(?:have|ask|tell|need)\s+{reference_pattern}\s+to\s+(?!review\b)",
@@ -746,7 +747,7 @@ def _pronoun_owner_signal(text: str, person: AssociatedPerson) -> bool:
         if not first_name or len(first_name) <= 2:
             continue
         named_then_pronoun = (
-            rf"\b{re.escape(first_name)}(?:'s)?\b.{0,120}"
+            rf"\b{re.escape(first_name)}(?:'s)?\b.{0, 120}"
             r"\b(?:help\s+(?:him|her|them)|make\s+sure\s+(?:he|she|they)|"
             r"confirm\s+with\s+(?:him|her|them)|(?:he|she|they)(?:'s|\s+is|\s+are)?"
             r"\s+working\s+from|(?:he|she|they)\s+(?:mentioned|flagged|found|identified))\b"

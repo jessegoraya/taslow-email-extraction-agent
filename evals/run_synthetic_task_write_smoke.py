@@ -14,7 +14,6 @@ from typing import Any
 import httpx
 from azure.cosmos import CosmosClient
 
-
 ZERO_GUID = "00000000-0000-0000-0000-000000000000"
 SOURCE_SYSTEM = "taslow-ai-synthetic-evaluation"
 
@@ -27,19 +26,25 @@ def main() -> None:
     parser.add_argument("--project-context", required=True, type=Path)
     parser.add_argument("--tenant-id", required=True)
     parser.add_argument("--synthetic-run-id", required=True)
-    parser.add_argument("--logic-app-endpoint", default=os.getenv("TASLOW_TASK_WRITE_LOGIC_APP_ENDPOINT"))
-    parser.add_argument("--project-callback-base-url", default=os.getenv("PROJECT_SCOPE_LINK_CALLBACK_BASE_URL"))
+    parser.add_argument(
+        "--logic-app-endpoint", default=os.getenv("TASLOW_TASK_WRITE_LOGIC_APP_ENDPOINT")
+    )
+    parser.add_argument(
+        "--project-callback-base-url", default=os.getenv("PROJECT_SCOPE_LINK_CALLBACK_BASE_URL")
+    )
     parser.add_argument(
         "--project-callback-function-key",
         default=os.getenv("PROJECT_SCOPE_LINK_CALLBACK_FUNCTION_KEY"),
     )
     parser.add_argument(
         "--project-function-base-url",
-        default=os.getenv("PROJECT_FUNCTION_BASE_URL") or os.getenv("PROJECT_SCOPE_LINK_CALLBACK_BASE_URL"),
+        default=os.getenv("PROJECT_FUNCTION_BASE_URL")
+        or os.getenv("PROJECT_SCOPE_LINK_CALLBACK_BASE_URL"),
     )
     parser.add_argument(
         "--project-agent-context-function-key",
-        default=os.getenv("PROJECT_AGENT_CONTEXT_FUNCTION_KEY") or os.getenv("PROJECT_FUNCTION_KEY"),
+        default=os.getenv("PROJECT_AGENT_CONTEXT_FUNCTION_KEY")
+        or os.getenv("PROJECT_FUNCTION_KEY"),
     )
     parser.add_argument("--task-function-base-url", default=os.getenv("TASK_FUNCTION_BASE_URL"))
     parser.add_argument("--task-function-key", default=os.getenv("TASK_FUNCTION_KEY"))
@@ -79,7 +84,9 @@ def main() -> None:
     if not args.write_tasks and not args.dry_run:
         raise SystemExit("Refusing to run: pass --write-tasks or --dry-run explicitly.")
     if args.write_tasks and not args.logic_app_endpoint:
-        raise SystemExit("TASLOW_TASK_WRITE_LOGIC_APP_ENDPOINT or --logic-app-endpoint is required.")
+        raise SystemExit(
+            "TASLOW_TASK_WRITE_LOGIC_APP_ENDPOINT or --logic-app-endpoint is required."
+        )
     if args.write_tasks and args.allow_create_gts:
         if not args.project_callback_base_url or not args.project_callback_function_key:
             raise SystemExit(
@@ -90,12 +97,14 @@ def main() -> None:
         if not args.project_function_base_url or not args.project_agent_context_function_key:
             raise SystemExit(
                 "Write mode requires live Project context refresh. Set PROJECT_FUNCTION_BASE_URL "
-                "and PROJECT_AGENT_CONTEXT_FUNCTION_KEY, or pass --skip-live-project-context-refresh."
+                "and PROJECT_AGENT_CONTEXT_FUNCTION_KEY, or pass "
+                "--skip-live-project-context-refresh."
             )
     if args.write_tasks and args.existing_gts_write_mode == "direct-cosmos":
         if not args.cosmos_connection_string:
             raise SystemExit(
-                "COSMOSDB_CONNECTION or --cosmos-connection-string is required for direct-cosmos mode."
+                "COSMOSDB_CONNECTION or --cosmos-connection-string is required for "
+                "direct-cosmos mode."
             )
     args.exclude_source_lines = _parse_source_lines(args.exclude_source_lines)
     args.exclude_source_lines.update(_load_excluded_source_lines(args.exclude_stage2_run_dir))
@@ -144,7 +153,9 @@ async def run(args: argparse.Namespace) -> None:
     )
     _write_json(out_dir / "stage2_project_context_refresh.json", refresh_report)
     _write_jsonl(out_dir / "stage2_write_candidates.jsonl", candidates)
-    _write_jsonl(out_dir / "stage2_task_write_requests.jsonl", [c["logicAppPayload"] for c in candidates])
+    _write_jsonl(
+        out_dir / "stage2_task_write_requests.jsonl", [c["logicAppPayload"] for c in candidates]
+    )
 
     responses: list[dict[str, Any]] = []
     verifications: list[dict[str, Any]] = []
@@ -209,10 +220,9 @@ async def run(args: argparse.Namespace) -> None:
                         base_delay_seconds=args.retry_base_delay_seconds,
                     )
                 responses.append(write_response)
-                group_task_set_id = (
-                    (write_response.get("json") or {}).get("groupTaskSetId")
-                    or candidate["groupTaskSetIdBeforeWrite"]
-                )
+                group_task_set_id = (write_response.get("json") or {}).get(
+                    "groupTaskSetId"
+                ) or candidate["groupTaskSetIdBeforeWrite"]
                 after = await _fetch_group_task_set_for_mode(
                     client,
                     cosmos_container=cosmos_container,
@@ -390,7 +400,9 @@ def _build_logic_app_payload(
         },
         "AssigneeStakeholderGroup": [
             {
-                "AssigneeStakeholderGroupID": _stable_guid(assignee_email or assignee_name or candidate_id),
+                "AssigneeStakeholderGroupID": _stable_guid(
+                    assignee_email or assignee_name or candidate_id
+                ),
                 "AssigneeStakeholderGroup": assignee_name,
             }
         ],
@@ -414,7 +426,9 @@ def _build_logic_app_payload(
                         "IndividualTaskStatus": "Open",
                         "IndividualTaskTitle": _truncate(task.get("title") or "", 180),
                         "IndividualTaskType": "Email Extracted Task",
-                        "IndividualTaskDescription": task.get("description") or task.get("title") or "",
+                        "IndividualTaskDescription": task.get("description")
+                        or task.get("title")
+                        or "",
                         "IndividualTaskNotes": notes,
                         "Priority": "Normal",
                         "AssignedPerson": assignee_email,
@@ -616,7 +630,7 @@ async def _post_add_group_task_direct(
             last_result["attempts"] = attempts
             return last_result
         if attempt < max_retries:
-            await asyncio.sleep(base_delay_seconds * (2 ** attempt))
+            await asyncio.sleep(base_delay_seconds * (2**attempt))
     assert last_result is not None
     last_result["attempts"] = attempts
     return last_result
@@ -648,9 +662,7 @@ async def _append_group_task_cosmos(
                 container.patch_item,
                 item=candidate["groupTaskSetIdBeforeWrite"],
                 partition_key=candidate["tenantId"],
-                patch_operations=[
-                    {"op": "add", "path": "/GroupTask/-", "value": group_task}
-                ],
+                patch_operations=[{"op": "add", "path": "/GroupTask/-", "value": group_task}],
             )
             last_result = {
                 "candidateId": candidate["candidateId"],
@@ -685,7 +697,7 @@ async def _append_group_task_cosmos(
             last_result["attempts"] = attempts
             return last_result
         if attempt < max_retries:
-            await asyncio.sleep(base_delay_seconds * (2 ** attempt))
+            await asyncio.sleep(base_delay_seconds * (2**attempt))
     assert last_result is not None
     last_result["attempts"] = attempts
     return last_result
@@ -715,7 +727,7 @@ async def _post_logic_app_with_retries(
             response["attempts"] = attempts
             return response
         if attempt < max_retries:
-            await asyncio.sleep(base_delay_seconds * (2 ** attempt))
+            await asyncio.sleep(base_delay_seconds * (2**attempt))
     attempts[-1]["final"] = True
     response["attempts"] = attempts
     return response
@@ -842,7 +854,9 @@ def _verify_write(
         "beforeGroupTaskCount": len((before or {}).get("GroupTask") or []),
         "afterGroupTaskCount": len(after_tasks),
         "createdGroupTask": task,
-        "fetchError": (after or {}).get("verificationFetchError") if isinstance(after, dict) else None,
+        "fetchError": (after or {}).get("verificationFetchError")
+        if isinstance(after, dict)
+        else None,
     }
 
 
@@ -854,7 +868,7 @@ def _find_duplicate_task(
     idempotency_key = candidate.get("headers", {}).get("x-taslow-idempotency-key", "")
     candidate_marker = f"candidateId={candidate['candidateId']}"
     idempotency_marker = f"idempotencyKey={idempotency_key}"
-    for task in (group_task_set.get("GroupTask") or group_task_set.get("grouptask") or []):
+    for task in group_task_set.get("GroupTask") or group_task_set.get("grouptask") or []:
         notes = str(task.get("GroupTaskNotes") or task.get("groupetasknotes") or "")
         if candidate_marker in notes or (idempotency_key and idempotency_marker in notes):
             return task
@@ -925,14 +939,21 @@ def _load_project_context(path: Path) -> dict[str, Any]:
     for project in payload.get("projects", []):
         project_id = _first(project, "projectId", "ProjectID", "id")
         scopes_by_id = {}
-        for scope in project.get("projectScopes") or project.get("scopes") or project.get("ProjectScopes") or []:
+        for scope in (
+            project.get("projectScopes")
+            or project.get("scopes")
+            or project.get("ProjectScopes")
+            or []
+        ):
             scope_id = _first(scope, "scopeId", "ScopeID")
             if not scope_id:
                 continue
             scopes_by_id[scope_id] = {
                 "scopeId": scope_id,
                 "scopeTitle": _first(scope, "scopeTitle", "ProjectScopeAreaTitle", "title") or "",
-                "scopeDescription": _first(scope, "scopeDescription", "ProjectScopeArea", "description")
+                "scopeDescription": _first(
+                    scope, "scopeDescription", "ProjectScopeArea", "description"
+                )
                 or "",
                 "groupTaskSetId": _first(scope, "groupTaskSetId", "GroupTaskSetID") or "",
             }
@@ -971,11 +992,7 @@ def _stable_guid(value: str) -> str:
 def _parse_source_lines(value: str) -> set[int]:
     if not value:
         return set()
-    return {
-        int(part.strip())
-        for part in value.split(",")
-        if part.strip()
-    }
+    return {int(part.strip()) for part in value.split(",") if part.strip()}
 
 
 def _load_excluded_source_lines(stage2_run_dirs: list[Path]) -> set[int]:

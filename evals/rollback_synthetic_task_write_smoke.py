@@ -11,7 +11,6 @@ from typing import Any
 
 import httpx
 
-
 SOURCE_SYSTEM = "taslow-ai-synthetic-evaluation"
 
 
@@ -24,7 +23,9 @@ def main() -> None:
     parser.add_argument("--synthetic-run-id")
     parser.add_argument("--task-function-base-url", default=os.getenv("TASK_FUNCTION_BASE_URL"))
     parser.add_argument("--task-function-key", default=os.getenv("TASK_FUNCTION_KEY"))
-    parser.add_argument("--project-callback-base-url", default=os.getenv("PROJECT_SCOPE_LINK_CALLBACK_BASE_URL"))
+    parser.add_argument(
+        "--project-callback-base-url", default=os.getenv("PROJECT_SCOPE_LINK_CALLBACK_BASE_URL")
+    )
     parser.add_argument(
         "--project-callback-function-key",
         default=os.getenv("PROJECT_SCOPE_LINK_CALLBACK_FUNCTION_KEY"),
@@ -143,7 +144,9 @@ async def run(args: argparse.Namespace) -> None:
     print(json.dumps({"outputDir": str(out_dir), **summary}, indent=2))
 
 
-def _load_stage2_rows(stage2_run_dirs: list[Path], synthetic_run_id: str | None) -> list[dict[str, Any]]:
+def _load_stage2_rows(
+    stage2_run_dirs: list[Path], synthetic_run_id: str | None
+) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for stage2_run_dir in stage2_run_dirs:
         summary = _load_json(stage2_run_dir / "stage2_task_write_summary.json")
@@ -261,10 +264,7 @@ async def _clear_project_scope_link(
     row: dict[str, Any],
     tenant_id: str,
 ) -> dict[str, Any]:
-    url = (
-        f"{base_url.rstrip()}/projects/"
-        f"{tenant_id}/{row['projectId']}/scopes/link-gts"
-    )
+    url = f"{base_url.rstrip()}/projects/{tenant_id}/{row['projectId']}/scopes/link-gts"
     payload = {
         "tenantId": tenant_id,
         "projectId": row["projectId"],
