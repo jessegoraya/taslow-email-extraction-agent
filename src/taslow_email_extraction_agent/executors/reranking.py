@@ -263,9 +263,7 @@ def _generic_deliverable_override_blocked(
     if not _has_generic_deliverable_word(text):
         return False
 
-    strong_confidence = (
-        rerank_confidence >= 0.90 and rerank_confidence >= current_confidence + 0.08
-    )
+    strong_confidence = rerank_confidence >= 0.90 and rerank_confidence >= current_confidence + 0.08
     return not (strong_confidence and _has_direct_scope_evidence(selected_scope, text))
 
 
@@ -608,7 +606,7 @@ def _assignee_role_signal(
         signals.append("named_or_alias_mentioned")
     if any(
         re.search(
-            rf"\b{re.escape(reference)}(?:'s)?\b.{0,80}"
+            rf"\b{re.escape(reference)}(?:'s)?\b.{0, 80}"
             r"\b(?:flagged|mentioned|noticed|thinks|found|identified|is working|wants)\b",
             text,
         )

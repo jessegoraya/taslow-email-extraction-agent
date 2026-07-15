@@ -11,7 +11,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from taslow_email_extraction_agent.clients.project_client import HttpProjectClient, InMemoryProjectClient
+from taslow_email_extraction_agent.clients.project_client import (
+    HttpProjectClient,
+    InMemoryProjectClient,
+)
 from taslow_email_extraction_agent.clients.project_search_client import AzureProjectSearchClient
 from taslow_email_extraction_agent.clients.task_history_client import InMemoryTaskHistoryClient
 from taslow_email_extraction_agent.config import Settings
@@ -71,7 +74,9 @@ async def run_eval(args: argparse.Namespace) -> None:
     project_client = (
         InMemoryProjectClient(projects)
         if args.project_context
-        else HttpProjectClient(settings.project_service_base_url or "", settings.taslow_service_api_key)
+        else HttpProjectClient(
+            settings.project_service_base_url or "", settings.taslow_service_api_key
+        )
     )
     services = WorkflowServices(
         settings=settings,
@@ -267,9 +272,7 @@ def _score_one(
     actual_due_dates = {task.get("dueDate") for task in actual_tasks if task.get("dueDate")}
     expected_assignees = {
         str(
-            task.get("assigneeEmail")
-            or task.get("expectedAssigneeEmail")
-            or task.get("assignee")
+            task.get("assigneeEmail") or task.get("expectedAssigneeEmail") or task.get("assignee")
         ).lower()
         for task in expected_tasks
         if task.get("assigneeEmail") or task.get("expectedAssigneeEmail") or task.get("assignee")
@@ -631,8 +634,7 @@ def _write_summary_md(path: Path, summary: dict[str, Any]) -> None:
     ]
     for scenario, bucket in summary["byScenario"].items():
         lines.append(
-            f"- {scenario}: {bucket['passed']}/{bucket['total']} "
-            f"({bucket['passRate']:.2%})"
+            f"- {scenario}: {bucket['passed']}/{bucket['total']} ({bucket['passRate']:.2%})"
         )
     lines.extend(["", "## Failure Counts"])
     for failure, count in summary["failureCounts"].items():

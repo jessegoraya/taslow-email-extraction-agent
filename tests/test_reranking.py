@@ -367,7 +367,4 @@ def test_scope_payload_includes_new_deterministic_outcome_hints():
 
     payload = _scope_payload(request, task, project, project.scopes[0], 0.7, [])
 
-    assert (
-        "travel_reservation_ticketing_configuration"
-        in payload["workOutcomeHints"]["hints"]
-    )
+    assert "travel_reservation_ticketing_configuration" in payload["workOutcomeHints"]["hints"]

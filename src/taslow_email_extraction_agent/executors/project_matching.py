@@ -192,10 +192,7 @@ def _score_project(
             confidence,
             min(
                 0.88,
-                threshold
-                + 0.035
-                + (participant_score * 0.04)
-                + (people_context_score * 0.015),
+                threshold + 0.035 + (participant_score * 0.04) + (people_context_score * 0.015),
             ),
         )
         decision_reason = "body_alias_search_and_participant_evidence"
@@ -242,10 +239,7 @@ def _score_project(
             confidence,
             min(
                 0.88,
-                threshold
-                + 0.015
-                + (people_context_score * 0.02)
-                + (lexical_score * 0.02),
+                threshold + 0.015 + (people_context_score * 0.02) + (lexical_score * 0.02),
             ),
         )
         decision_reason = "open_item_search_and_participant_evidence"
@@ -262,8 +256,10 @@ def _score_project(
             ),
         )
         decision_reason = "unique_client_domain_and_search_evidence"
-    elif client_domain_match and semantic_score >= 0.65 and (
-        participant_score > 0 or lexical_score >= 0.05 or people_context_score > 0
+    elif (
+        client_domain_match
+        and semantic_score >= 0.65
+        and (participant_score > 0 or lexical_score >= 0.05 or people_context_score > 0)
     ):
         confidence = max(
             confidence,
@@ -282,8 +278,10 @@ def _score_project(
     elif thread_score >= threshold and (semantic_score >= 0.55 or participant_score > 0):
         confidence = max(confidence, min(0.90, thread_score))
         decision_reason = "thread_history_supported"
-    elif not semantic_score and participant_score >= 0.5 and (
-        people_context_score > 0 or lexical_score >= 0.08
+    elif (
+        not semantic_score
+        and participant_score >= 0.5
+        and (people_context_score > 0 or lexical_score >= 0.08)
     ):
         confidence = max(confidence, min(0.88, threshold + 0.01))
         decision_reason = "participant_evidence_without_search"
@@ -308,11 +306,7 @@ def _score_project(
         )
         or strong_body_alias_match
     )
-    if (
-        confidence >= threshold
-        and sender_is_external_to_project
-        and not strong_project_anchor
-    ):
+    if confidence >= threshold and sender_is_external_to_project and not strong_project_anchor:
         confidence = min(confidence, threshold - 0.01)
         decision_reason = "weak_external_project_anchor"
         evidence.append("weak_external_project_anchor")

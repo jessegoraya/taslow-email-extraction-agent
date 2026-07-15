@@ -11,5 +11,7 @@ dist/
 build/
 *.egg-info/
 .coverage
+coverage.xml
 htmlcov/
+test-results.xml
 

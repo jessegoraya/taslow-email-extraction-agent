@@ -19,9 +19,7 @@ async def test_subject_matter_owner_beats_single_visible_recipient():
         to=[{"email": "jesse@tenant.com", "name": "Jesse"}],
         cc=[{"email": "david@tenant.com", "name": "David"}],
     )
-    task = _task(
-        "Resolve the subcontractor invoice discrepancy before approving payment."
-    )
+    task = _task("Resolve the subcontractor invoice discrepancy before approving payment.")
 
     matches = await resolve_assignees(request, task, _project())
 

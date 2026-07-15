@@ -166,9 +166,7 @@ class ProjectContext(BaseModel):
         else:
             values = list(value)
         normalized = {
-            str(item).strip().lower().removeprefix("@")
-            for item in values
-            if str(item).strip()
+            str(item).strip().lower().removeprefix("@") for item in values if str(item).strip()
         }
         return sorted(normalized)
 
@@ -250,9 +248,7 @@ class ExtractionDiagnostics(BaseModel):
     project_hydration_provider: str | None = Field(default=None, alias="projectHydrationProvider")
     search_query_count: int = Field(default=0, alias="searchQueryCount")
     scope_search_query_count: int = Field(default=0, alias="scopeSearchQueryCount")
-    project_scoring: ProjectScoringDiagnostics | None = Field(
-        default=None, alias="projectScoring"
-    )
+    project_scoring: ProjectScoringDiagnostics | None = Field(default=None, alias="projectScoring")
     project_candidate_scores: list[ProjectMatchResult] = Field(
         default_factory=list, alias="projectCandidateScores"
     )

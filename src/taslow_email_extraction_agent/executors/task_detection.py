@@ -404,9 +404,7 @@ def _merge_task_pair(
     )
     title = left.title if len(left.title) <= len(right.title) else right.title
     evidence = list(
-        dict.fromkeys(
-            [*left.evidence, *right.evidence, "merged_overlapping_task_candidates"]
-        )
+        dict.fromkeys([*left.evidence, *right.evidence, "merged_overlapping_task_candidates"])
     )
     return left.model_copy(
         update={
