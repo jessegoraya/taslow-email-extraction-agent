@@ -41,17 +41,22 @@ steps:
     displayName: Run agent tests and coverage
 
   - task: PublishTestResults@2
+    displayName: Publish email extraction agent test results
     condition: always()
     inputs:
       testResultsFormat: JUnit
       testResultsFiles: '$(Agent.TempDirectory)/agent-tests.xml'
-      testRunTitle: Taslow email extraction agent
+      testRunTitle: 'Taslow | Component | Email Agent | Unit and Evaluation'
       failTaskOnFailedTests: true
+      failTaskOnFailureToPublishResults: true
+      failTaskOnMissingResultsFile: true
+      publishRunAttachments: true
 
   - task: PublishCodeCoverageResults@2
     condition: succeededOrFailed()
     inputs:
       summaryFileLocation: '$(Agent.TempDirectory)/agent-coverage.xml'
+      failIfCoverageEmpty: true
 
   - script: python -m pip_audit --skip-editable
     displayName: Audit Python dependencies
