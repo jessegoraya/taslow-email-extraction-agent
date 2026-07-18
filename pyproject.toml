@@ -10,6 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "agent-framework>=1.0.0",
+  "azure-ai-agentserver-invocations>=1.0.0b5",
   "azure-cosmos>=4.7.0",
   "azure-identity>=1.17.0",
   "fastapi>=0.115.0",
@@ -44,7 +45,7 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py312"
+target-version = "py313"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

@@ -21,8 +21,8 @@ steps:
 
   - task: UsePythonVersion@0
     inputs:
-      versionSpec: '3.12'
-    displayName: Use Python 3.12
+      versionSpec: '3.13'
+    displayName: Use Python 3.13
 
   - script: python -m pip install --upgrade pip "setuptools>=83" wheel
     displayName: Upgrade Python build tools
@@ -41,17 +41,22 @@ steps:
     displayName: Run agent tests and coverage
 
   - task: PublishTestResults@2
+    displayName: Publish email extraction agent test results
     condition: always()
     inputs:
       testResultsFormat: JUnit
       testResultsFiles: '$(Agent.TempDirectory)/agent-tests.xml'
-      testRunTitle: Taslow email extraction agent
+      testRunTitle: 'Taslow | Component | Email Agent | Unit and Evaluation'
       failTaskOnFailedTests: true
+      failTaskOnFailureToPublishResults: true
+      failTaskOnMissingResultsFile: true
+      publishRunAttachments: true
 
   - task: PublishCodeCoverageResults@2
     condition: succeededOrFailed()
     inputs:
       summaryFileLocation: '$(Agent.TempDirectory)/agent-coverage.xml'
+      failIfCoverageEmpty: true
 
   - script: python -m pip_audit --skip-editable
     displayName: Audit Python dependencies
@@ -61,8 +66,16 @@ steps:
     condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
 
   - pwsh: |
+      $ErrorActionPreference = 'Stop'
+      $sourceArchive = 'dist/foundry-hosted-agent-source.zip'
+      git archive --format=zip --output $sourceArchive "$(Build.SourceVersion)"
+      if ($LASTEXITCODE -ne 0) { throw 'Unable to create the immutable hosted-agent source archive.' }
+    displayName: Create immutable Foundry hosted-agent source archive
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+
+  - pwsh: |
       Copy-Item RELEASE_NOTES.md dist
-      $files = Get-ChildItem dist -File | Where-Object Name -ne RELEASE_NOTES.md | ForEach-Object {
+      $files = Get-ChildItem dist -File | Where-Object Name -ne artifact-manifest.json | ForEach-Object {
         [ordered]@{
           name = $_.Name
           sha256 = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -75,6 +88,8 @@ steps:
         repository = "jessegoraya/taslow-email-extraction-agent"
         sourceCommit = "$(Build.SourceVersion)"
         buildId = "$(Build.BuildId)"
+        deploymentProtocol = "foundry-invocations-direct-code"
+        deploymentSource = "foundry-hosted-agent-source.zip"
         files = @($files)
       } | ConvertTo-Json -Depth 6 | Set-Content dist/artifact-manifest.json
     displayName: Generate immutable agent artifact manifest
