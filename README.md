@@ -100,6 +100,9 @@ Workflow steps use Microsoft Agent Framework's Python functional workflow decora
 the `agent-framework` package is installed. The pure async functions remain testable directly,
 which lets business rules and scoring be verified without making model calls.
 
-The current implementation includes deterministic task detection as a safe baseline. A Foundry
-model-backed extractor can be enabled by implementing `FoundryTaskExtractor` without changing
-the workflow contract.
+The current implementation includes a deterministic fallback and a Foundry model-backed task
+extractor. In Azure Test it uses Microsoft Entra managed identity rather than an Azure OpenAI
+API key. The hosted-agent entry point is `main.py`, which exposes Foundry Agent Service's
+`/invocations` protocol for the existing structured email payload. The initial hosted release
+does not connect to BloomSky mailboxes, APIM, Task/Project writes, or Search; those integrations
+remain separately governed activation phases.

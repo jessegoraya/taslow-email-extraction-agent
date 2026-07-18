@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -39,6 +40,9 @@ class Settings(BaseSettings):
     azure_search_api_key: str | None = Field(default=None, alias="AZURE_SEARCH_API_KEY")
     azure_search_api_version: str = Field(default="2024-07-01", alias="AZURE_SEARCH_API_VERSION")
     azure_openai_endpoint: str | None = Field(default=None, alias="AZURE_OPENAI_ENDPOINT")
+    azure_openai_auth_mode: Literal["entra", "api-key"] = Field(
+        default="entra", alias="AZURE_OPENAI_AUTH_MODE"
+    )
     azure_openai_api_key: str | None = Field(default=None, alias="AZURE_OPENAI_API_KEY")
     azure_openai_embedding_deployment: str = Field(
         default="text-embedding-3-small", alias="AZURE_OPENAI_EMBEDDING_DEPLOYMENT"

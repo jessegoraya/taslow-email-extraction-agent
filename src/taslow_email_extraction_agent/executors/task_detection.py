@@ -6,8 +6,10 @@ from dataclasses import dataclass
 from typing import Protocol
 
 import httpx
+from azure.core.exceptions import ClientAuthenticationError
 
 from taslow_email_extraction_agent.agent_framework_compat import step
+from taslow_email_extraction_agent.azure_openai_auth import AzureOpenAIRequestAuthenticator
 from taslow_email_extraction_agent.config import Settings
 from taslow_email_extraction_agent.models import EmailExtractionRequest, ExtractedTaskCandidate
 from taslow_email_extraction_agent.text_utils import (
@@ -147,9 +149,15 @@ class HeuristicTaskExtractor:
 class FoundryTaskExtractor:
     """Azure OpenAI / Foundry-backed task extractor with deterministic fallback."""
 
-    def __init__(self, settings: Settings, fallback: TaskExtractor | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        fallback: TaskExtractor | None = None,
+        authenticator: AzureOpenAIRequestAuthenticator | None = None,
+    ) -> None:
         self._settings = settings
         self._fallback = fallback or HeuristicTaskExtractor()
+        self._authenticator = authenticator or AzureOpenAIRequestAuthenticator(settings)
         self.last_run_info: TaskExtractionRunInfo | None = None
 
     async def extract_tasks(self, request: EmailExtractionRequest) -> list[ExtractedTaskCandidate]:
@@ -167,7 +175,14 @@ class FoundryTaskExtractor:
                 schema_valid=True,
             )
             return candidates
-        except (httpx.HTTPError, ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        except (
+            ClientAuthenticationError,
+            httpx.HTTPError,
+            ValueError,
+            KeyError,
+            TypeError,
+            json.JSONDecodeError,
+        ) as exc:
             if not self._settings.agent_task_extractor_fallback_enabled:
                 raise
             return await self._fallback_with_info(
@@ -176,11 +191,7 @@ class FoundryTaskExtractor:
 
     @property
     def _is_configured(self) -> bool:
-        return bool(
-            self._settings.azure_openai_endpoint
-            and self._settings.azure_openai_api_key
-            and self._settings.azure_ai_model_deployment_name
-        )
+        return self._authenticator.is_configured
 
     async def _extract_with_model(
         self, request: EmailExtractionRequest
@@ -193,10 +204,8 @@ class FoundryTaskExtractor:
             f"{endpoint.rstrip('/')}/openai/deployments/{deployment}/chat/completions"
             f"?api-version={self._settings.azure_openai_chat_api_version}"
         )
-        headers = {
-            "api-key": self._settings.azure_openai_api_key or "",
-            "Content-Type": "application/json",
-        }
+        headers = await self._authenticator.get_headers()
+        headers["Content-Type"] = "application/json"
         payload = {
             "messages": [
                 {
