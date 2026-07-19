@@ -1,9 +1,8 @@
-"""Small compatibility layer around Microsoft Agent Framework.
+"""Optional Microsoft Agent Framework decorators for local Inspector authoring.
 
-The production dependency is `agent-framework`. Tests can still import the package when the
-dependency is unavailable because these decorators degrade to transparent wrappers. This keeps
-business logic testable while allowing the same functions to participate in Agent Framework
-runtime execution when the package is installed.
+The Foundry-hosted runtime uses the framework-agnostic Invocations protocol adapter and must not
+depend on Agent Framework. When the optional Inspector extra is absent, these decorators remain
+transparent so the production workflow executes as ordinary async Python.
 """
 
 from collections.abc import Callable

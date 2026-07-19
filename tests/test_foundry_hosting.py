@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 
 from azure.core.credentials import AccessToken
@@ -68,3 +69,16 @@ def test_foundry_host_entrypoint_declares_invocations_contract() -> None:
     assert "runtime: python_3_13" in deployment_source
     assert "protocol: invocations" in deployment_source
     assert 'value: "false"' in deployment_source
+
+
+def test_foundry_hosted_runtime_excludes_inspector_only_framework_dependencies() -> None:
+    project_file = Path(__file__).parents[1] / "pyproject.toml"
+    project = tomllib.loads(project_file.read_text(encoding="utf-8"))
+    runtime_dependencies = project["project"]["dependencies"]
+    inspector_dependencies = project["project"]["optional-dependencies"]["inspector"]
+    agent_ignore = (Path(__file__).parents[1] / ".agentignore").read_text(encoding="utf-8")
+
+    assert not any(dependency.startswith("agent-framework") for dependency in runtime_dependencies)
+    assert any(dependency.startswith("agent-framework") for dependency in inspector_dependencies)
+    assert "inspector_entrypoint.py" in agent_ignore
+    assert "requirements-inspector.txt" in agent_ignore

@@ -30,6 +30,9 @@ steps:
   - script: python -m pip install -e .[dev]
     displayName: Install agent and test dependencies
 
+  - script: python -m pip check
+    displayName: Verify runtime dependency integrity
+
   - script: python -m ruff check .
     displayName: Lint agent source
 
@@ -63,6 +66,33 @@ steps:
 
   - script: python -m build
     displayName: Build wheel and source distribution
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+
+  - script: |
+      python - <<'PY'
+      from pathlib import Path
+      import zipfile
+
+      wheel_path = next(Path("dist").glob("taslow_email_extraction_agent-*.whl"))
+      with zipfile.ZipFile(wheel_path) as wheel:
+          metadata_path = next(
+              name for name in wheel.namelist() if name.endswith(".dist-info/METADATA")
+          )
+          metadata = wheel.read(metadata_path).decode("utf-8")
+
+      runtime_agent_framework = [
+          line
+          for line in metadata.splitlines()
+          if line.startswith("Requires-Dist: agent-framework") and "extra ==" not in line
+      ]
+      if runtime_agent_framework:
+          raise SystemExit(
+              "Foundry runtime must not include Agent Framework dependencies: "
+              + ", ".join(runtime_agent_framework)
+          )
+      print("Foundry hosted-runtime wheel metadata is free of Inspector-only dependencies.")
+      PY
+    displayName: Verify Foundry hosted-runtime wheel metadata
     condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
 
   - pwsh: |
