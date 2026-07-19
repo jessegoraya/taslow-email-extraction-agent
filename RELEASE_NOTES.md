@@ -1,5 +1,12 @@
 # Email Extraction Agent Release Notes
 
+## v0.1.0-dev.3
+
+- Replaces the hosted runtime's Azure AI Search API-key requirement with Microsoft Entra bearer-token authentication.
+- Uses the dedicated Hosted agent instance identity for Search and embedding access in Azure while retaining developer credentials for local validation.
+- Adds fail-closed tests for Search and embedding token acquisition, bearer headers, and tenant-prefiltered vector queries.
+- Keeps Search retrieval disabled until the agent identity RBAC and synthetic index-ingestion releases are separately approved.
+
 ## v0.1.0-dev.2
 
 - Adds the Azure AI Foundry hosted-agent entry point using the Invocations protocol and a `/readiness` health endpoint.

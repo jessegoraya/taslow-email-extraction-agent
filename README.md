@@ -107,3 +107,10 @@ API key. The hosted-agent entry point is `main.py`, which exposes Foundry Agent 
 `/invocations` protocol for the existing structured email payload. The initial hosted release
 does not connect to BloomSky mailboxes, APIM, Task/Project writes, or Search; those integrations
 remain separately governed activation phases.
+
+The Azure AI Search project/scope client is also keyless. When a later release enables
+`AGENT_PROJECT_SEARCH_PROVIDER=azure-ai-search`, it obtains bearer tokens for Search and the
+embedding model through `DefaultAzureCredential`. In a Hosted agent, Azure resolves that
+credential to the agent's dedicated instance identity; locally it can use the developer's Azure
+credential. The Test hosted manifest remains on `cosmos-legacy` until the agent identity has the
+reviewed Search role and the versioned synthetic index ingestion has completed.

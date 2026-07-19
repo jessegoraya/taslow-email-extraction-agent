@@ -4,7 +4,14 @@ from dataclasses import dataclass
 from typing import Protocol
 
 import httpx
+from azure.core.exceptions import AzureError
+from azure.identity.aio import DefaultAzureCredential
 
+from taslow_email_extraction_agent.azure_openai_auth import (
+    AsyncTokenCredential,
+    AzureOpenAIRequestAuthenticator,
+)
+from taslow_email_extraction_agent.azure_search_auth import AzureSearchRequestAuthenticator
 from taslow_email_extraction_agent.config import Settings
 
 
@@ -33,31 +40,44 @@ class ProjectSearchClient(Protocol):
 
 
 class AzureProjectSearchClient:
-    def __init__(self, settings: Settings) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        *,
+        credential: AsyncTokenCredential | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        required_settings = [
+            ("AZURE_SEARCH_ENDPOINT", settings.azure_search_endpoint),
+            ("AZURE_SEARCH_INDEX_NAME", settings.azure_search_index_name),
+            ("AZURE_OPENAI_ENDPOINT", settings.azure_openai_endpoint),
+        ]
+        if settings.azure_openai_auth_mode == "api-key":
+            required_settings.append(("AZURE_OPENAI_API_KEY", settings.azure_openai_api_key))
         missing = [
             name
-            for name, value in [
-                ("AZURE_SEARCH_ENDPOINT", settings.azure_search_endpoint),
-                ("AZURE_SEARCH_INDEX_NAME", settings.azure_search_index_name),
-                ("AZURE_SEARCH_API_KEY", settings.azure_search_api_key),
-                ("AZURE_OPENAI_ENDPOINT", settings.azure_openai_endpoint),
-                ("AZURE_OPENAI_API_KEY", settings.azure_openai_api_key),
-            ]
+            for name, value in required_settings
             if not value
         ]
         if missing:
             raise ValueError(f"Missing Azure project search settings: {', '.join(missing)}")
 
+        token_credential = credential or DefaultAzureCredential(
+            exclude_interactive_browser_credential=True
+        )
         self._search_endpoint = settings.azure_search_endpoint.rstrip("/")
         self._search_index_name = settings.azure_search_index_name
-        self._search_api_key = settings.azure_search_api_key
         self._search_api_version = settings.azure_search_api_version
         self._openai_endpoint = settings.azure_openai_endpoint.rstrip("/")
-        self._openai_api_key = settings.azure_openai_api_key
         self._embedding_deployment = settings.azure_openai_embedding_deployment
         self._embedding_api_version = settings.azure_openai_embedding_api_version
         self._project_top_k = settings.project_search_top_k
         self._scope_top_k = settings.scope_search_top_k
+        self._search_authenticator = AzureSearchRequestAuthenticator(token_credential)
+        self._embedding_authenticator = AzureOpenAIRequestAuthenticator(
+            settings, credential=token_credential
+        )
+        self._transport = transport
 
     async def search_projects(self, tenant_id: str, query_text: str) -> list[SearchCandidate]:
         filter_expression = (
@@ -108,14 +128,15 @@ class AzureProjectSearchClient:
             f"{self._search_endpoint}/indexes/{self._search_index_name}/docs/search"
             f"?api-version={self._search_api_version}"
         )
-        headers = {"api-key": self._search_api_key, "Content-Type": "application/json"}
 
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            headers = await self._search_authenticator.get_headers()
+            headers["Content-Type"] = "application/json"
+            async with httpx.AsyncClient(timeout=30.0, transport=self._transport) as client:
                 response = await client.post(url, headers=headers, json=payload)
                 response.raise_for_status()
                 body = response.json()
-        except httpx.HTTPError as exc:
+        except (AzureError, httpx.HTTPError, ValueError) as exc:
             raise ProjectSearchUnavailable("Azure AI Search query failed.") from exc
 
         rows = [
@@ -139,15 +160,16 @@ class AzureProjectSearchClient:
             f"{self._openai_endpoint}/openai/deployments/{self._embedding_deployment}"
             f"/embeddings?api-version={self._embedding_api_version}"
         )
-        headers = {"api-key": self._openai_api_key, "Content-Type": "application/json"}
         payload = {"input": query_text}
 
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            headers = await self._embedding_authenticator.get_headers()
+            headers["Content-Type"] = "application/json"
+            async with httpx.AsyncClient(timeout=30.0, transport=self._transport) as client:
                 response = await client.post(url, headers=headers, json=payload)
                 response.raise_for_status()
                 body = response.json()
-        except httpx.HTTPError as exc:
+        except (AzureError, httpx.HTTPError, ValueError) as exc:
             raise ProjectSearchUnavailable("Azure OpenAI embedding generation failed.") from exc
 
         try:

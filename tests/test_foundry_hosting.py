@@ -69,6 +69,9 @@ def test_foundry_host_entrypoint_declares_invocations_contract() -> None:
     assert "runtime: python_3_13" in deployment_source
     assert "protocol: invocations" in deployment_source
     assert 'value: "false"' in deployment_source
+    assert "value: cosmos-legacy" in deployment_source
+    assert "AZURE_SEARCH_ENDPOINT" not in deployment_source
+    assert "AZURE_SEARCH_API_KEY" not in deployment_source
 
 
 def test_foundry_hosted_runtime_excludes_inspector_only_framework_dependencies() -> None:
