@@ -5,11 +5,10 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "taslow-email-extraction-agent"
 version = "0.1.0"
-description = "Taslow Microsoft Agent Framework email-to-task extraction service."
+description = "Taslow email-to-task extraction hosted agent service."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-  "agent-framework>=1.0.0",
   "azure-ai-agentserver-invocations>=1.0.0b5",
   "azure-cosmos>=4.7.0",
   "azure-identity>=1.17.0",
@@ -23,6 +22,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+inspector = [
+  "agent-framework>=1.0.0",
+  "agent-framework-foundry-hosting>=1.0.0",
+]
 dev = [
   "build>=1.2.2",
   "pip-audit>=2.10.0",

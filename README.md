@@ -1,6 +1,6 @@
 # Taslow Email Extraction Agent
 
-Python Microsoft Agent Framework service that replaces the retired PromptFlow-based
+Python hosted-agent service that replaces the retired PromptFlow-based
 `TaslowEmailExtractML` implementation.
 
 The service exposes `POST /email-extractions`, accepts the tenant email ingestion payload,
@@ -94,11 +94,12 @@ python -m agentdev run inspector_entrypoint.py --port 8087
 
 Then open Agent Inspector from Foundry Toolkit and point it at port `8087`.
 
-## Microsoft Agent Framework Notes
+## Microsoft Agent Framework Inspector Notes
 
-Workflow steps use Microsoft Agent Framework's Python functional workflow decorators when
-the `agent-framework` package is installed. The pure async functions remain testable directly,
-which lets business rules and scoring be verified without making model calls.
+The production Foundry runtime uses the framework-agnostic Invocations protocol adapter and does
+not install Microsoft Agent Framework. The optional Inspector dependencies enable the Python
+functional-workflow decorators for local visual authoring. Without that optional extra, the pure
+async functions run directly, which keeps business rules and scoring testable without model calls.
 
 The current implementation includes a deterministic fallback and a Foundry model-backed task
 extractor. In Azure Test it uses Microsoft Entra managed identity rather than an Azure OpenAI
