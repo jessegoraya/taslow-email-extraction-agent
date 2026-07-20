@@ -1,5 +1,11 @@
 # Email Extraction Agent Release Notes
 
+## v0.1.0-dev.4
+
+- Fixes Foundry session startup by installing the `src`-layout runtime package as a portable wheel instead of an editable build-workspace link.
+- Adds an isolated CI installation that imports the packaged agent from outside the repository checkout before publishing the immutable source artifact.
+- Retains the custom Invocations protocol and all existing activation boundaries; this release does not enable Search retrieval, BloomSky, or downstream writes.
+
 ## v0.1.0-dev.3
 
 - Replaces the hosted runtime's Azure AI Search API-key requirement with Microsoft Entra bearer-token authentication.

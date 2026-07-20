@@ -33,6 +33,14 @@ steps:
   - script: python -m pip check
     displayName: Verify runtime dependency integrity
 
+  - script: |
+      python -m venv "$(Agent.TempDirectory)/foundry-runtime-smoke"
+      "$(Agent.TempDirectory)/foundry-runtime-smoke/bin/python" -m pip install --upgrade pip
+      "$(Agent.TempDirectory)/foundry-runtime-smoke/bin/python" -m pip install -r requirements.txt
+      cd "$(Agent.TempDirectory)"
+      "$(Agent.TempDirectory)/foundry-runtime-smoke/bin/python" -c "import taslow_email_extraction_agent; print(taslow_email_extraction_agent.__file__)"
+    displayName: Verify isolated Foundry runtime package import
+
   - script: python -m ruff check .
     displayName: Lint agent source
 

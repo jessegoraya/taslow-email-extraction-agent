@@ -85,3 +85,13 @@ def test_foundry_hosted_runtime_excludes_inspector_only_framework_dependencies()
     assert any(dependency.startswith("agent-framework") for dependency in inspector_dependencies)
     assert "inspector_entrypoint.py" in agent_ignore
     assert "requirements-inspector.txt" in agent_ignore
+
+
+def test_foundry_remote_build_installs_a_portable_runtime_package() -> None:
+    runtime_requirements = (
+        Path(__file__).parents[1] / "requirements.txt"
+    ).read_text(encoding="utf-8").splitlines()
+    requirements = [line.strip() for line in runtime_requirements if line.strip()]
+
+    assert requirements == ["."]
+    assert not any(requirement.startswith(("-e", "--editable")) for requirement in requirements)
