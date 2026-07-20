@@ -114,3 +114,9 @@ embedding model through `DefaultAzureCredential`. In a Hosted agent, Azure resol
 credential to the agent's dedicated instance identity; locally it can use the developer's Azure
 credential. The Test hosted manifest remains on `cosmos-legacy` until the agent identity has the
 reviewed Search role and the versioned synthetic index ingestion has completed.
+
+Foundry's direct-code remote build installs `requirements.txt` in a temporary build workspace and
+then starts the copied source at `/app/main.py`. The runtime requirement therefore installs this
+project as a wheel (`.`), not as an editable checkout (`-e .`), so the `src` package remains
+importable after the temporary build workspace is removed. Component CI verifies that behavior in
+an isolated virtual environment from outside the repository checkout.
