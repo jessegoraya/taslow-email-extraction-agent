@@ -26,6 +26,7 @@ def build_services() -> WorkflowServices:
         project_client = HttpProjectClient(
             settings.project_service_base_url,
             api_key=settings.taslow_service_api_key,
+            token_scope=settings.project_service_token_scope,
         )
     else:
         project_client = InMemoryProjectClient()

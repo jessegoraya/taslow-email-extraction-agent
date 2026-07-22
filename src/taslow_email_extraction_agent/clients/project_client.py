@@ -5,7 +5,9 @@ from urllib.parse import urlparse
 
 import httpx
 
+from taslow_email_extraction_agent.azure_openai_auth import AsyncTokenCredential
 from taslow_email_extraction_agent.models import AssociatedPerson, ProjectContext, ProjectScope
+from taslow_email_extraction_agent.service_auth import ManagedIdentityRequestAuthenticator
 
 
 class ProjectClient(Protocol):
@@ -44,18 +46,33 @@ class InMemoryProjectClient:
 class HttpProjectClient:
     """Project service client using the existing Taslow Project endpoints."""
 
-    def __init__(self, base_url: str, api_key: str | None = None) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str | None = None,
+        token_scope: str | None = None,
+        *,
+        credential: AsyncTokenCredential | None = None,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
+        self._authenticator = (
+            ManagedIdentityRequestAuthenticator(
+                token_scope,
+                credential=credential,
+            )
+            if token_scope
+            else None
+        )
+        self._transport = transport
         host = urlparse(self._base_url).netloc.lower()
         self._path_prefix = "/api" if host.endswith("azurewebsites.net") else ""
 
     async def get_active_projects(self, tenant_id: str) -> list[ProjectContext]:
-        headers = {}
-        if self._api_key:
-            headers["x-functions-key"] = self._api_key
+        headers = await self._get_headers()
 
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        async with httpx.AsyncClient(timeout=20.0, transport=self._transport) as client:
             response = await client.get(
                 self._url(f"/projects/active/{tenant_id}"),
                 headers=headers,
@@ -71,11 +88,9 @@ class HttpProjectClient:
         return [self._map_project(row) for row in rows]
 
     async def get_project_detail(self, tenant_id: str, project_id: str) -> ProjectContext | None:
-        headers = {}
-        if self._api_key:
-            headers["x-functions-key"] = self._api_key
+        headers = await self._get_headers()
 
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        async with httpx.AsyncClient(timeout=20.0, transport=self._transport) as client:
             response = await client.get(
                 self._url(f"/projects/{tenant_id}/{project_id}/detail"),
                 headers=headers,
@@ -93,9 +108,7 @@ class HttpProjectClient:
         if not project_ids:
             return []
 
-        headers = {}
-        if self._api_key:
-            headers["x-functions-key"] = self._api_key
+        headers = await self._get_headers()
 
         payload = {
             "tenantId": tenant_id,
@@ -105,7 +118,7 @@ class HttpProjectClient:
             "includeAssociatedManagers": True,
         }
 
-        async with httpx.AsyncClient(timeout=20.0) as client:
+        async with httpx.AsyncClient(timeout=20.0, transport=self._transport) as client:
             response = await client.post(
                 self._url("/internal/projects/agent-context/batch"),
                 headers=headers,
@@ -182,3 +195,10 @@ class HttpProjectClient:
 
     def _url(self, path: str) -> str:
         return f"{self._base_url}{self._path_prefix}{path}"
+
+    async def _get_headers(self) -> dict[str, str]:
+        if self._api_key:
+            return {"x-functions-key": self._api_key}
+        if self._authenticator:
+            return await self._authenticator.get_headers()
+        raise ValueError("Project service authentication is not configured.")
