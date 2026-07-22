@@ -104,16 +104,18 @@ async functions run directly, which keeps business rules and scoring testable wi
 The current implementation includes a deterministic fallback and a Foundry model-backed task
 extractor. In Azure Test it uses Microsoft Entra managed identity rather than an Azure OpenAI
 API key. The hosted-agent entry point is `main.py`, which exposes Foundry Agent Service's
-`/invocations` protocol for the existing structured email payload. The initial hosted release
-does not connect to BloomSky mailboxes, APIM, Task/Project writes, or Search; those integrations
-remain separately governed activation phases.
+`/invocations` protocol for the existing structured email payload. The image supports keyless
+Azure AI Search retrieval and managed-identity Project hydration through APIM. Mailbox access,
+index population, APIM identity policy, remote invocation, and Task writes remain separately
+governed activation phases.
 
-The Azure AI Search project/scope client is also keyless. When a later release enables
+The Azure AI Search project/scope client is also keyless. With
 `AGENT_PROJECT_SEARCH_PROVIDER=azure-ai-search`, it obtains bearer tokens for Search and the
-embedding model through `DefaultAzureCredential`. In a Hosted agent, Azure resolves that
-credential to the agent's dedicated instance identity; locally it can use the developer's Azure
-credential. The Test hosted manifest remains on `cosmos-legacy` until the agent identity has the
-reviewed Search role and the versioned synthetic index ingestion has completed.
+embedding model through `DefaultAzureCredential`. Project hydration uses
+`PROJECT_SERVICE_BASE_URL` and `PROJECT_SERVICE_TOKEN_SCOPE`; APIM must validate the token and
+the dedicated agent identity before forwarding an internal request. In a Hosted agent, Azure
+resolves the credential to the agent's instance identity; locally it can use the developer's
+Azure credential.
 
 Foundry's direct-code remote build installs `requirements.txt` in a temporary build workspace and
 then starts the copied source at `/app/main.py`. The runtime requirement therefore installs this

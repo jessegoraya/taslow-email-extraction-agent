@@ -69,8 +69,11 @@ def test_foundry_host_entrypoint_declares_invocations_contract() -> None:
     assert "runtime: python_3_13" in deployment_source
     assert "protocol: invocations" in deployment_source
     assert 'value: "false"' in deployment_source
-    assert "value: cosmos-legacy" in deployment_source
-    assert "AZURE_SEARCH_ENDPOINT" not in deployment_source
+    assert "value: azure-ai-search" in deployment_source
+    assert "name: AZURE_SEARCH_ENDPOINT" in deployment_source
+    assert "name: AZURE_SEARCH_INDEX_NAME" in deployment_source
+    assert "name: PROJECT_SERVICE_BASE_URL" in deployment_source
+    assert "name: PROJECT_SERVICE_TOKEN_SCOPE" in deployment_source
     assert "AZURE_SEARCH_API_KEY" not in deployment_source
 
 

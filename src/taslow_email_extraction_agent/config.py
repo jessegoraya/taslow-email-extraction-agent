@@ -29,6 +29,9 @@ class Settings(BaseSettings):
         default=True, alias="AGENT_TASK_EXTRACTOR_FALLBACK_ENABLED"
     )
     project_service_base_url: str | None = Field(default=None, alias="PROJECT_SERVICE_BASE_URL")
+    project_service_token_scope: str | None = Field(
+        default=None, alias="PROJECT_SERVICE_TOKEN_SCOPE"
+    )
     task_service_base_url: str | None = Field(default=None, alias="TASK_SERVICE_BASE_URL")
     taslow_service_api_key: str | None = Field(default=None, alias="TASLOW_SERVICE_API_KEY")
 

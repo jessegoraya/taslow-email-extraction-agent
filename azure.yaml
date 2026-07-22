@@ -26,7 +26,15 @@ services:
       - name: AGENT_TASK_EXTRACTOR_FALLBACK_ENABLED
         value: "false"
       - name: AGENT_PROJECT_SEARCH_PROVIDER
-        value: cosmos-legacy
+        value: azure-ai-search
+      - name: AZURE_SEARCH_ENDPOINT
+        value: ${AZURE_SEARCH_ENDPOINT}
+      - name: AZURE_SEARCH_INDEX_NAME
+        value: ${AZURE_SEARCH_INDEX_NAME}
+      - name: PROJECT_SERVICE_BASE_URL
+        value: ${PROJECT_SERVICE_BASE_URL}
+      - name: PROJECT_SERVICE_TOKEN_SCOPE
+        value: ${PROJECT_SERVICE_TOKEN_SCOPE}
     protocols:
       - protocol: invocations
         version: 1.0.0
