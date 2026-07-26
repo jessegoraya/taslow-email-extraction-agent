@@ -13,9 +13,11 @@ from taslow_email_extraction_agent.models import (
     ExtractedTaskCandidate,
     ExtractionStatus,
     Participant,
+    ProjectScope,
 )
 from taslow_email_extraction_agent.workflow import (
     _apply_ordered_multi_task_recipient,
+    _match_explicit_scope_reference,
     _normalize_assignees_for_task,
     _rewrite_ordered_multi_task_assignments,
     run_email_extraction,
@@ -124,6 +126,74 @@ async def test_forwarded_handoff_uses_forwarded_context_for_scope_search(base_re
     assert response.tasks[0].assignee_email == "tessa@tenant.com"
     assert search_client.scope_queries
     assert any("electrical notes" in query.lower() for query in search_client.scope_queries)
+
+
+async def test_explicit_scope_title_overrides_competing_semantic_result(
+    base_request,
+    services,
+    project,
+):
+    project.scopes = [
+        ProjectScope(
+            scopeId="scope-explicit",
+            title="Scope/General Description",
+            description="General data analysis services.",
+            groupTaskSetId="gts-explicit",
+        ),
+        ProjectScope(
+            scopeId="scope-semantic",
+            title="Work Requirements",
+            description="Requirements summaries and task order deliverables.",
+            groupTaskSetId="gts-semantic",
+        ),
+    ]
+    services.project_search_client = CompetingScopeSearchClient()
+    base_request.subject = "Requirements summary"
+    base_request.body_text = (
+        "Tessa, draft the requirements summary focused on "
+        "Scope/General Description by next Friday at 5."
+    )
+
+    response = await run_email_extraction(base_request, services)
+
+    assert response.status == ExtractionStatus.TASKS_READY
+    assert response.tasks[0].scope_id == "scope-explicit"
+    assert "explicit_scope_title_reference" in response.tasks[0].evidence
+
+
+def test_explicit_scope_reference_ignores_quoted_message(base_request, project):
+    project.scopes = [
+        ProjectScope(
+            scopeId="scope-current",
+            title="Current Work",
+            description="Current work.",
+        ),
+        ProjectScope(
+            scopeId="scope-quoted",
+            title="Quoted Work",
+            description="Quoted work.",
+        ),
+    ]
+    base_request.body_text = (
+        "Tessa, please handle the current request.\n\n"
+        "-----Original Message-----\n"
+        "Please use Quoted Work."
+    )
+
+    assert _match_explicit_scope_reference(base_request, project) is None
+
+
+def test_explicit_scope_reference_fails_closed_when_longest_match_is_ambiguous(
+    base_request,
+    project,
+):
+    project.scopes = [
+        ProjectScope(scopeId="scope-1", title="Data Review", description="First."),
+        ProjectScope(scopeId="scope-2", title="Data-Review", description="Second."),
+    ]
+    base_request.body_text = "Tessa, complete the Data Review by Friday."
+
+    assert _match_explicit_scope_reference(base_request, project) is None
 
 
 async def test_direct_assignment_language_overrides_single_recipient(base_request, services):
@@ -323,6 +393,30 @@ class CapturingScopeSearchClient(FakeProjectSearchClient):
     ) -> list[SearchCandidate]:
         self.scope_queries.append(query_text)
         return await super().search_scopes(tenant_id, project_id, query_text)
+
+
+class CompetingScopeSearchClient(FakeProjectSearchClient):
+    async def search_scopes(
+        self, tenant_id: str, project_id: str, query_text: str
+    ) -> list[SearchCandidate]:
+        return [
+            SearchCandidate(
+                project_id=project_id,
+                scope_id="scope-semantic",
+                score=0.94,
+                rank=1,
+                score_raw=0.94,
+                score_margin=0.30,
+            ),
+            SearchCandidate(
+                project_id=project_id,
+                scope_id="scope-explicit",
+                score=0.60,
+                rank=2,
+                score_raw=0.60,
+                score_margin=0.0,
+            ),
+        ]
 
 
 def _assignment(
