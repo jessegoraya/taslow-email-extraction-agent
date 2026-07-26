@@ -23,13 +23,17 @@ from taslow_email_extraction_agent.models import (
     ExtractedTaskCandidate,
     ExtractionDiagnostics,
     ExtractionStatus,
+    ProjectContext,
     ProjectMatchResult,
     ProjectScope,
     ProjectScoringDiagnostics,
     ThreadContext,
 )
 from taslow_email_extraction_agent.services import WorkflowServices
-from taslow_email_extraction_agent.text_utils import task_context_text
+from taslow_email_extraction_agent.text_utils import (
+    split_newest_and_quoted_text,
+    task_context_text,
+)
 
 
 @dataclass(slots=True)
@@ -171,9 +175,18 @@ async def _build_assignments(
             if services.project_search_client:
                 raise
 
-        scope, scope_confidence, scope_evidence = await match_scope_area(
-            task, scored_project, thread_context
-        )
+        scope = _match_explicit_scope_reference(request, scored_project)
+        if scope:
+            scope_confidence = 0.98
+            scope_evidence = ["explicit_scope_title_reference"]
+            if scope.search_score:
+                scope_evidence.append("azure_ai_search_scope_similarity")
+            if scope.search_rank == 1 and scope.search_score:
+                scope_evidence.append("top_scope_search_candidate")
+        else:
+            scope, scope_confidence, scope_evidence = await match_scope_area(
+                task, scored_project, thread_context
+            )
         if services.scope_reranker:
             scope, scope_confidence, scope_evidence = await services.scope_reranker.rerank_scope(
                 request,
@@ -489,6 +502,46 @@ async def _apply_scope_search_scores(
         for scope in project.scopes
     ]
     return project.model_copy(update={"scopes": scopes})
+
+
+def _match_explicit_scope_reference(
+    request: EmailExtractionRequest,
+    project: ProjectContext,
+) -> ProjectScope | None:
+    newest_body, _quoted_context = split_newest_and_quoted_text(request.body_text)
+    authored_text = _normalize_scope_reference_text(" ".join([request.subject, newest_body]))
+    if not authored_text:
+        return None
+
+    matches = [
+        scope
+        for scope in project.scopes
+        if _normalize_scope_reference_text(scope.title)
+        and _contains_normalized_phrase(
+            authored_text,
+            _normalize_scope_reference_text(scope.title),
+        )
+    ]
+    if not matches:
+        return None
+
+    longest_length = max(len(_normalize_scope_reference_text(scope.title)) for scope in matches)
+    longest_matches = [
+        scope
+        for scope in matches
+        if len(_normalize_scope_reference_text(scope.title)) == longest_length
+    ]
+    return longest_matches[0] if len(longest_matches) == 1 else None
+
+
+def _normalize_scope_reference_text(value: str) -> str:
+    return " ".join(
+        "".join(character if character.isalnum() else " " for character in value.lower()).split()
+    )
+
+
+def _contains_normalized_phrase(text: str, phrase: str) -> bool:
+    return f" {phrase} " in f" {text} "
 
 
 def _overall_confidence(
