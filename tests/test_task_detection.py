@@ -5,6 +5,7 @@ from typing import Any
 from taslow_email_extraction_agent.config import Settings
 from taslow_email_extraction_agent.executors.task_detection import (
     FoundryTaskExtractor,
+    _merge_overlapping_tasks,
     _request_prompt_payload,
     _task_recovery_reason,
 )
@@ -284,3 +285,59 @@ async def test_foundry_extractor_records_unsuccessful_recovery(base_request):
     assert extractor.last_run_info.recovery_attempted is True
     assert extractor.last_run_info.recovery_succeeded is False
     assert extractor.last_run_info.recovery_reason == "direct_action_request"
+
+
+def test_overlapping_tasks_with_distinct_explicit_due_dates_remain_separate():
+    candidates = [
+        ExtractedTaskCandidate(
+            sourceTaskId="task-1",
+            title="Analyze Government Furnished Property and Services",
+            description="Analyze the Government Furnished Property and Services section.",
+            mentionedPeople=[],
+            dueText="2026-08-13",
+            confidence=0.94,
+            evidence=["direct_request"],
+        ),
+        ExtractedTaskCandidate(
+            sourceTaskId="task-2",
+            title="Summarize Government Furnished Property and Services",
+            description="Summarize the Government Furnished Property and Services section.",
+            mentionedPeople=["Jgoraya"],
+            dueText="2026-08-14",
+            confidence=0.94,
+            evidence=["named_request"],
+        ),
+    ]
+
+    merged = _merge_overlapping_tasks(candidates)
+
+    assert len(merged) == 2
+    assert [task.due_text for task in merged] == ["2026-08-13", "2026-08-14"]
+
+
+def test_duplicate_tasks_with_same_due_date_still_merge():
+    candidates = [
+        ExtractedTaskCandidate(
+            sourceTaskId="task-1",
+            title="Review the Facility Security analysis",
+            description="Review the Facility Security analysis before the next cycle.",
+            mentionedPeople=["David"],
+            dueText="2026-08-22",
+            confidence=0.91,
+            evidence=["direct_request"],
+        ),
+        ExtractedTaskCandidate(
+            sourceTaskId="task-2",
+            title="Review Facility Security analysis",
+            description="Review the Facility Security analysis before the next cycle.",
+            mentionedPeople=["David"],
+            dueText="2026-08-22",
+            confidence=0.93,
+            evidence=["duplicate_model_candidate"],
+        ),
+    ]
+
+    merged = _merge_overlapping_tasks(candidates)
+
+    assert len(merged) == 1
+    assert "merged_overlapping_task_candidates" in merged[0].evidence
