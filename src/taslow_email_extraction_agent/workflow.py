@@ -508,14 +508,25 @@ def _match_explicit_scope_reference(
     request: EmailExtractionRequest,
     project: ProjectContext,
 ) -> ProjectScope | None:
+    subject_match = _match_scope_title_in_text(request.subject, project.scopes)
+    if subject_match:
+        return subject_match
+
     newest_body, _quoted_context = split_newest_and_quoted_text(request.body_text)
-    authored_text = _normalize_scope_reference_text(" ".join([request.subject, newest_body]))
+    return _match_scope_title_in_text(newest_body, project.scopes)
+
+
+def _match_scope_title_in_text(
+    text: str,
+    scopes: list[ProjectScope],
+) -> ProjectScope | None:
+    authored_text = _normalize_scope_reference_text(text)
     if not authored_text:
         return None
 
     matches = [
         scope
-        for scope in project.scopes
+        for scope in scopes
         if _normalize_scope_reference_text(scope.title)
         and _contains_normalized_phrase(
             authored_text,

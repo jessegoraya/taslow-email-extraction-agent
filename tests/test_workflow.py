@@ -196,6 +196,35 @@ def test_explicit_scope_reference_fails_closed_when_longest_match_is_ambiguous(
     assert _match_explicit_scope_reference(base_request, project) is None
 
 
+def test_explicit_scope_reference_prefers_subject_over_longer_body_context(
+    base_request,
+    project,
+):
+    project.scopes = [
+        ProjectScope(
+            scopeId="scope-requested",
+            title="Contractor Furnished Items And Services",
+            description="Items and services supplied by the contractor.",
+        ),
+        ProjectScope(
+            scopeId="scope-contrast",
+            title="Government Furnished Property, Equipment, And Services",
+            description="Property and services supplied by the government.",
+        ),
+    ]
+    base_request.subject = "Contractor furnished items and services update"
+    base_request.body_text = (
+        "Please update the Contractor Furnished Items And Services analysis. "
+        "Explain what the contractor provides versus what is listed as "
+        "Government Furnished Property, Equipment, And Services."
+    )
+
+    match = _match_explicit_scope_reference(base_request, project)
+
+    assert match is not None
+    assert match.scope_id == "scope-requested"
+
+
 async def test_direct_assignment_language_overrides_single_recipient(base_request, services):
     base_request.body_text = "Jesse, have Tessa update the electrical scope by next Friday at 5."
     base_request.to = [Participant(email="jesse@tenant.com", name="Jesse")]
