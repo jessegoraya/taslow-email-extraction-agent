@@ -1,5 +1,18 @@
 # Email Extraction Agent Release Notes
 
+## v0.1.0-dev.7
+
+- Recognizes a bare forwarded delivery as a current handoff only when a deterministic guard finds
+  a concrete direct action request. Completed, FYI, conditional, and status-only forwards remain
+  non-actionable.
+- Adds `document` and `incorporate` to the bounded action vocabulary used by recovery.
+- Resolves otherwise tied Project candidates with the lexical, Search, client-domain, and
+  Search-margin evidence already used by Project scoring.
+- Publishes all hydrated Project candidate scores in diagnostics so governed evaluation can
+  distinguish Search absence from a below-threshold candidate.
+- Keeps Project confidence, tenant isolation, no-write behavior, and stable hosted routing
+  unchanged.
+
 ## v0.1.0-dev.6
 
 - Expands tenant-filtered Project retrieval from eight to twenty-five Search candidates so the

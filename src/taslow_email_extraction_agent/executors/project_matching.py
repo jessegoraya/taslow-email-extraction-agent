@@ -66,10 +66,11 @@ async def score_project_candidates(
         for project in projects
     ]
     confidence_best = max(scored, key=lambda item: item.result.confidence)
+    participant_best = max(scored, key=_project_primary_selection_key)
     best = max(scored, key=_project_selection_key)
     if (
-        best.project.project_id != confidence_best.project.project_id
-        and best.result.confidence == confidence_best.result.confidence
+        participant_best.project.project_id != confidence_best.project.project_id
+        and participant_best.result.confidence == confidence_best.result.confidence
     ):
         best.result = best.result.model_copy(
             update={
@@ -78,6 +79,23 @@ async def score_project_candidates(
                         [
                             *best.result.evidence,
                             "project_selection_participant_tiebreak",
+                        ]
+                    )
+                )
+            }
+        )
+    if (
+        best.project.project_id != participant_best.project.project_id
+        and _project_primary_selection_key(best)
+        == _project_primary_selection_key(participant_best)
+    ):
+        best.result = best.result.model_copy(
+            update={
+                "evidence": list(
+                    dict.fromkeys(
+                        [
+                            *best.result.evidence,
+                            "project_selection_weighted_evidence_tiebreak",
                         ]
                     )
                 )
@@ -94,13 +112,24 @@ async def score_project_candidates(
     )
 
 
-def _project_selection_key(item: ProjectScore) -> tuple[float, float, float]:
+def _project_primary_selection_key(item: ProjectScore) -> tuple[float, float, float]:
     result = item.result
     return (
         result.confidence,
         result.participant_score or 0.0,
         result.people_context_score or 0.0,
     )
+
+
+def _project_selection_key(item: ProjectScore) -> tuple[float, float, float, float]:
+    result = item.result
+    weighted_evidence = (
+        ((result.client_domain_score or 0.0) * 0.18)
+        + ((result.lexical_score or 0.0) * 0.16)
+        + ((result.search_score_normalized or 0.0) * 0.25)
+        + (min(1.0, (result.search_margin or 0.0) * 3) * 0.05)
+    )
+    return (*_project_primary_selection_key(item), weighted_evidence)
 
 
 def _score_project(

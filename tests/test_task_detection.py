@@ -78,6 +78,28 @@ def test_recovery_guard_detects_forwarded_actionable_handoff(base_request):
     assert _task_recovery_reason(base_request) == "forwarded_actionable_handoff"
 
 
+def test_recovery_guard_detects_forwarded_delivery_action_request(base_request):
+    base_request.body_text = (
+        "Begin forwarded message:\n"
+        "From: External Program Lead\n"
+        "To: tessa@tenant.example\n"
+        "Please document the C-14 deliverable analysis by Friday."
+    )
+
+    assert _task_recovery_reason(base_request) == "forwarded_delivery_action_request"
+
+
+def test_recovery_guard_rejects_forwarded_delivery_status(base_request):
+    base_request.body_text = (
+        "Begin forwarded message:\n"
+        "From: External Program Lead\n"
+        "To: tessa@tenant.example\n"
+        "The analysis has been completed and no further action is needed."
+    )
+
+    assert _task_recovery_reason(base_request) is None
+
+
 def test_recovery_guard_rejects_completed_work(base_request):
     base_request.body_text = (
         "I have completed the operational service delivery analysis. "
@@ -169,7 +191,27 @@ def test_prompt_payload_includes_forwarded_context_only_for_handoff(base_request
     assert payload["newestAuthoredText"] == "Tessa, can you handle this request below?"
     assert "update the electrical scope" in payload["forwardedContextText"]
     assert payload["forwardedActionableHandoff"] is True
+    assert payload["forwardedDeliveryActionRequest"] is False
     assert payload["taskDetectionRecoveryReason"] == "forwarded_actionable_handoff"
+
+
+def test_prompt_payload_includes_complete_forwarded_delivery(base_request):
+    base_request.body_text = (
+        "-----Original Message-----\n"
+        "From: External Program Lead\n"
+        "To: tessa@tenant.example\n"
+        "Please reconcile the transition analysis by Friday."
+    )
+
+    payload = _request_prompt_payload(
+        base_request,
+        "forwarded_delivery_action_request",
+    )
+
+    assert payload["newestAuthoredText"] == ""
+    assert "reconcile the transition analysis" in payload["forwardedContextText"]
+    assert payload["forwardedActionableHandoff"] is True
+    assert payload["forwardedDeliveryActionRequest"] is True
 
 
 async def test_foundry_extractor_recovers_empty_first_pass(base_request):
