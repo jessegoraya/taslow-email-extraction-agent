@@ -1,5 +1,17 @@
 # Email Extraction Agent Release Notes
 
+## v0.1.0-dev.11
+
+- Expands fail-closed second-pass recovery for concrete deliverable requests and current
+  forwarded/quoted handoffs while preserving completed, informational, and no-action controls.
+- Uses a uniquely referenced Project Scope title as a strong Project-selection anchor and rejects
+  participant-only matches that lack associated-people context.
+- Discards all task candidates when no Project passes validation, returning
+  `taskCandidateCount: 0` with explicit diagnostic evidence and no downstream write surface.
+- Keeps separate task outcomes distinct even when they share an assignee and due date.
+- Leaves stable hosted routing unchanged until matched-control and full 1,500-case evaluation gates
+  pass.
+
 ## v0.1.0-dev.10
 
 - Requires sender self-ownership language to name the action the sender will perform, preventing

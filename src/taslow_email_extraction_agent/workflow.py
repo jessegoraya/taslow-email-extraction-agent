@@ -110,11 +110,12 @@ async def email_extraction_workflow(message: WorkflowInput) -> EmailExtractionRe
         not project_score
         or project_score.result.confidence < services.settings.project_confidence_threshold
     ):
+        warnings.append("task_candidates_discarded_no_project_match")
         return _response(
             request=request,
             services=services,
             status=ExtractionStatus.NO_PROJECT_MATCH,
-            task_candidate_count=len(tasks),
+            task_candidate_count=0,
             project_match=project_score.result if project_score else None,
             project_candidates=project_score.candidate_results if project_score else [],
             assignments=[],
@@ -138,6 +139,8 @@ async def email_extraction_workflow(message: WorkflowInput) -> EmailExtractionRe
         ExtractionStatus.TASKS_READY if valid_assignments else ExtractionStatus.NO_PROJECT_MATCH
     )
     stopped_after = None if valid_assignments else "ResultValidationExecutor"
+    if not valid_assignments:
+        warnings.append("task_candidates_discarded_no_project_match")
     if status == ExtractionStatus.TASKS_READY:
         _record_thread_context(request, services, project_score, valid_assignments)
 
@@ -145,7 +148,7 @@ async def email_extraction_workflow(message: WorkflowInput) -> EmailExtractionRe
         request=request,
         services=services,
         status=status,
-        task_candidate_count=len(tasks),
+        task_candidate_count=len(tasks) if valid_assignments else 0,
         project_match=project_score.result,
         project_candidates=project_score.candidate_results,
         assignments=valid_assignments,

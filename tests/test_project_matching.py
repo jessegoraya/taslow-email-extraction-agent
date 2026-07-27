@@ -10,6 +10,7 @@ from taslow_email_extraction_agent.models import (
     EmailExtractionRequest,
     ExtractedTaskCandidate,
     ProjectContext,
+    ProjectScope,
 )
 
 
@@ -53,7 +54,8 @@ async def test_external_sender_can_match_project_when_project_person_and_search_
 
     assert score is not None
     assert score.result.confidence >= 0.80
-    assert score.result.decision_reason == "participant_evidence_with_moderate_search"
+    assert score.result.decision_reason == "explicit_unique_scope_title_reference"
+    assert "explicit_unique_scope_title_reference" in score.result.evidence
     assert "external_sender_allowed_with_project_people_context" in score.result.evidence
 
 
@@ -666,6 +668,127 @@ async def test_open_item_language_bridges_search_and_participant_project_evidenc
     assert "implicit_open_item_project_signal" in score.result.evidence
 
 
+async def test_unique_scope_title_reference_overrides_ambiguous_participant_search():
+    request = EmailExtractionRequest(
+        tenantId="tenant-1",
+        mailbox="david@tenant.example",
+        direction="received",
+        graphEventId="graph-unique-scope",
+        internetMessageId="<unique-scope@example.com>",
+        messageId="unique-scope",
+        subject="Quality Assurance Surveillance Plan review",
+        bodyText=(
+            "David, please capture final edits to the Quality Assurance Surveillance Plan "
+            "before Friday."
+        ),
+        **{"from": {"email": "lead@external.example", "name": "External Lead"}},
+        to=[{"email": "david@tenant.example", "name": "David"}],
+        cc=[],
+        bcc=[],
+        idempotencyKey="key-unique-scope",
+        correlationId="corr-unique-scope",
+    )
+    task = ExtractedTaskCandidate(
+        sourceTaskId="extracted-task-1",
+        title="Capture final QASP edits",
+        description="Capture final edits to the Quality Assurance Surveillance Plan.",
+        mentionedPeople=["David"],
+        dueText="before Friday",
+        confidence=0.92,
+        evidence=["explicit_task_language"],
+    )
+    wrong_search_result = _project(
+        project_id="wrong-project",
+        name="Unrelated Operations Support",
+        search_score=0.78,
+        search_rank=1,
+        search_margin=0.08,
+        people=[AssociatedPerson(name="David", email="david@tenant.example")],
+        scopes=[
+            ProjectScope(
+                scopeId="wrong-scope",
+                title="Operational Service Delivery",
+                description="General service delivery.",
+            )
+        ],
+    )
+    expected = _project(
+        project_id="expected-project",
+        name="Facility Services",
+        search_score=0.66,
+        search_rank=9,
+        search_margin=0.0,
+        people=[AssociatedPerson(name="David", email="david@tenant.example")],
+        scopes=[
+            ProjectScope(
+                scopeId="expected-scope",
+                title="Quality Assurance Surveillance Plan",
+                description="Continuous inspection and corrective action.",
+            )
+        ],
+    )
+
+    score = await score_project_candidates(
+        request,
+        [task],
+        [wrong_search_result, expected],
+        thread_context=None,
+        threshold=0.80,
+    )
+
+    assert score is not None
+    assert score.project.project_id == "expected-project"
+    assert score.result.decision_reason == "explicit_unique_scope_title_reference"
+    assert "explicit_unique_scope_title_reference" in score.result.evidence
+
+
+async def test_participant_and_weak_text_without_people_context_fail_closed():
+    request = EmailExtractionRequest(
+        tenantId="tenant-1",
+        mailbox="david@tenant.example",
+        direction="received",
+        graphEventId="graph-no-project",
+        internetMessageId="<no-project@example.com>",
+        messageId="no-project",
+        subject="Uncatalogued client request",
+        bodyText="Please prepare the unrelated client package by Friday.",
+        **{"from": {"email": "lead@external.example", "name": "External Lead"}},
+        to=[{"email": "david@tenant.example", "name": ""}],
+        cc=[],
+        bcc=[],
+        idempotencyKey="key-no-project",
+        correlationId="corr-no-project",
+    )
+    task = ExtractedTaskCandidate(
+        sourceTaskId="extracted-task-1",
+        title="Prepare unrelated client package",
+        description="Prepare the unrelated client package by Friday.",
+        mentionedPeople=[],
+        dueText="by Friday",
+        confidence=0.92,
+        evidence=["explicit_task_language"],
+    )
+    candidate = _project(
+        project_id="nearest-project",
+        name="General Client Support",
+        search_score=0.71,
+        search_rank=4,
+        search_margin=0.0,
+        people=[AssociatedPerson(name="David", email="david@tenant.example")],
+    )
+
+    score = await score_project_candidates(
+        request,
+        [task],
+        [candidate],
+        thread_context=None,
+        threshold=0.80,
+    )
+
+    assert score is not None
+    assert score.result.confidence < 0.80
+
+
 def _project(
     *,
     project_id: str,
@@ -675,6 +798,7 @@ def _project(
     search_margin: float,
     people: list[AssociatedPerson],
     client_domains: list[str] | None = None,
+    scopes: list[ProjectScope] | None = None,
 ) -> ProjectContext:
     return ProjectContext(
         projectId=project_id,
@@ -683,7 +807,7 @@ def _project(
         clientDomains=client_domains or [],
         associatedPeople=people,
         associatedManagers=[],
-        scopes=[],
+        scopes=scopes or [],
         searchScore=search_score,
         searchScoreRaw=search_score,
         searchRank=search_rank,

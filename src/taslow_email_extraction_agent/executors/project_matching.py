@@ -11,7 +11,11 @@ from taslow_email_extraction_agent.models import (
     ProjectMatchResult,
     ThreadContext,
 )
-from taslow_email_extraction_agent.text_utils import lexical_similarity, token_set
+from taslow_email_extraction_agent.text_utils import (
+    lexical_similarity,
+    newest_authored_text,
+    token_set,
+)
 
 
 @dataclass(slots=True)
@@ -46,6 +50,14 @@ async def score_project_candidates(
     participant_weights = _participant_project_weights(projects, participant_emails)
     sender_email = request.from_participant.email if request.from_participant else ""
     client_domain_counts = _client_domain_project_counts(projects)
+    unique_scope_titles = _unique_project_scope_titles(projects)
+    scope_reference_text = " ".join(
+        [
+            subject_text,
+            newest_authored_text(request.body_text),
+            *[task.description for task in tasks],
+        ]
+    )
 
     scored = [
         ProjectScore(
@@ -61,6 +73,8 @@ async def score_project_candidates(
                 client_domain_counts,
                 thread_context,
                 threshold,
+                unique_scope_titles,
+                scope_reference_text,
             ),
         )
         for project in projects
@@ -143,6 +157,8 @@ def _score_project(
     client_domain_counts: dict[str, int],
     thread_context: ThreadContext | None,
     threshold: float,
+    unique_scope_titles: set[str],
+    scope_reference_text: str,
 ) -> ProjectMatchResult:
     evidence: list[str] = []
 
@@ -178,8 +194,8 @@ def _score_project(
         evidence.append("body_project_alias_match")
 
     sender_is_external_to_project = bool(sender_email and sender_email not in project_people_emails)
-    external_participant_signal = sender_is_external_to_project and (
-        people_context_score >= 0.08 or participant_score > 0
+    external_participant_signal = (
+        sender_is_external_to_project and people_context_score >= 0.08
     )
     if external_participant_signal:
         evidence.append("external_sender_allowed_with_project_people_context")
@@ -204,6 +220,13 @@ def _score_project(
     search_margin = project.search_margin or 0.0
     if semantic_score:
         evidence.append("azure_ai_search_project_similarity")
+    unique_scope_match = _has_unique_scope_title_reference(
+        project,
+        scope_reference_text,
+        unique_scope_titles,
+    )
+    if unique_scope_match:
+        evidence.append("explicit_unique_scope_title_reference")
     open_item_signal = _has_unresolved_work_signal(email_text)
     if open_item_signal:
         evidence.append("implicit_open_item_project_signal")
@@ -226,7 +249,19 @@ def _score_project(
     confidence = weighted_confidence
     decision_reason = "weighted_evidence"
 
-    if subject_alias_match and semantic_score >= 0.65 and project.search_rank == 1:
+    if unique_scope_match:
+        confidence = max(
+            confidence,
+            min(
+                0.96,
+                threshold
+                + 0.08
+                + (participant_score * 0.04)
+                + (people_context_score * 0.02),
+            ),
+        )
+        decision_reason = "explicit_unique_scope_title_reference"
+    elif subject_alias_match and semantic_score >= 0.65 and project.search_rank == 1:
         confidence = max(
             confidence,
             min(
@@ -274,8 +309,7 @@ def _score_project(
         participant_score >= 0.5
         and semantic_score >= 0.65
         and (
-            lexical_score >= 0.08
-            or people_context_score >= 0.25
+            people_context_score >= 0.25
             or subject_alias_match
             or body_alias_match
             or client_domain_match
@@ -351,9 +385,10 @@ def _score_project(
         or (project.search_rank == 1 and semantic_score >= 0.78 and search_margin >= 0.05)
     )
     strong_project_anchor = (
-        subject_alias_match
+        unique_scope_match
+        or subject_alias_match
         or thread_score >= threshold
-        or participant_score >= 0.5
+        or (participant_score >= 0.5 and people_context_score > 0)
         or client_domain_unique
         or (
             client_domain_match
@@ -412,6 +447,37 @@ def _client_domain_project_counts(projects: list[ProjectContext]) -> dict[str, i
         for domain in set(project.client_domains):
             counts[domain] = counts.get(domain, 0) + 1
     return counts
+
+
+def _unique_project_scope_titles(projects: list[ProjectContext]) -> set[str]:
+    owners: dict[str, set[str]] = {}
+    for project in projects:
+        for scope in project.scopes:
+            title = _scope_reference_key(scope.title)
+            if len(title) < 12 or len(title.split()) < 2:
+                continue
+            owners.setdefault(title, set()).add(project.project_id)
+    return {title for title, project_ids in owners.items() if len(project_ids) == 1}
+
+
+def _has_unique_scope_title_reference(
+    project: ProjectContext,
+    text: str,
+    unique_scope_titles: set[str],
+) -> bool:
+    text_key = _scope_reference_key(text)
+    if not text_key:
+        return False
+    return any(
+        title in unique_scope_titles
+        and re.search(rf"(?<![a-z0-9]){re.escape(title)}(?![a-z0-9])", text_key)
+        for title in (_scope_reference_key(scope.title) for scope in project.scopes)
+        if title
+    )
+
+
+def _scope_reference_key(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
 
 
 def _email_domain(email: str) -> str:

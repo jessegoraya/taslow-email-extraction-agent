@@ -55,8 +55,10 @@ async def test_low_project_confidence_stops_before_write(base_request, services)
     response = await run_email_extraction(base_request, services)
 
     assert response.status == ExtractionStatus.NO_PROJECT_MATCH
+    assert response.task_candidate_count == 0
     assert response.tasks == []
     assert response.diagnostics.stopped_after == "ProjectScoringExecutor"
+    assert "task_candidates_discarded_no_project_match" in response.diagnostics.warnings
 
 
 async def test_azure_search_candidates_are_hydrated_from_project_service(base_request, services):

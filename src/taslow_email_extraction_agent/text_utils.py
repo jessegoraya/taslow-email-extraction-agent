@@ -18,11 +18,20 @@ QUOTED_OR_FORWARDED_RE = re.compile(
     r")\s*$"
 )
 FORWARDED_HANDOFF_RE = re.compile(
+    r"(?:"
     r"\b(?:can|could|would|please|need\s+you\s+to|take\s+care\s+of|handle)\b"
     r".{0,120}\b(?:handle|take\s+care\s+of|follow\s+up\s+on|address|work\s+on|"
     r"respond\s+to|coordinate|complete|review|prepare|send|update)?\b"
     r".{0,80}\b(?:this|the|client|customer|original|forwarded)?\s*"
-    r"(?:request|ask|item|thread|email|note|below)\b",
+    r"(?:request|ask|item|thread|email|note|below)\b"
+    r"|"
+    r"\b(?:passing|sending)\s+(?:this|it)\s+along\b.{0,120}"
+    r"\b(?:current\s+(?:direction|guidance|request)|work\s+from|act\s+on|"
+    r"handle|review|complete|prepare|update|respond)\b"
+    r"|"
+    r"\b(?:current\s+(?:direction|guidance)|request\s+below)\b.{0,100}"
+    r"\b(?:work\s+from|act\s+on|handle|review|complete|prepare|update|respond)\b"
+    r")",
     re.IGNORECASE,
 )
 
@@ -43,12 +52,22 @@ def split_newest_and_quoted_text(value: str | None) -> tuple[str, str]:
     if not text:
         return "", ""
     match = QUOTED_OR_FORWARDED_RE.search(text)
-    quoted = ""
+    quoted_parts: list[str] = []
     if match:
-        quoted = text[match.end() :].strip()
+        quoted_parts.append(text[match.end() :].strip())
         text = text[: match.start()].strip()
-    lines = [line for line in text.splitlines() if not line.lstrip().startswith(">")]
-    return "\n".join(lines).strip(), quoted
+    authored_lines: list[str] = []
+    quoted_lines: list[str] = []
+    for line in text.splitlines():
+        stripped = line.lstrip()
+        if stripped.startswith(">"):
+            quoted_lines.append(re.sub(r"^\s*>\s?", "", line))
+        else:
+            authored_lines.append(line)
+    if quoted_lines:
+        quoted_parts.insert(0, "\n".join(quoted_lines).strip())
+    quoted = "\n\n".join(part for part in quoted_parts if part).strip()
+    return "\n".join(authored_lines).strip(), quoted
 
 
 def has_forwarded_actionable_handoff(value: str | None) -> bool:
