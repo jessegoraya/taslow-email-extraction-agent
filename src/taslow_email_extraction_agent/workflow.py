@@ -614,7 +614,7 @@ def _response(
             if services.project_search_client and assignments
             else 0,
             projectScoring=_project_scoring_diagnostics(project_match),
-            projectCandidateScores=(project_candidates or [])[:10],
+            projectCandidateScores=project_candidates or [],
             stoppedAfter=stopped_after,
             warnings=warnings,
         ),

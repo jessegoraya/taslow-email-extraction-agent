@@ -176,6 +176,66 @@ async def test_equal_confidence_and_participants_preserve_search_order():
     assert "project_selection_participant_tiebreak" not in score.result.evidence
 
 
+async def test_equal_primary_evidence_uses_weighted_project_evidence():
+    request = EmailExtractionRequest(
+        tenantId="tenant-1",
+        mailbox="alex@tenant.example",
+        direction="received",
+        graphEventId="graph-project-weighted-tie",
+        internetMessageId="<project-weighted-tie@example.com>",
+        messageId="project-weighted-tie",
+        subject="Personnel training analysis",
+        bodyText=(
+            "Please prepare the personnel hiring and training analysis for distribution support."
+        ),
+        **{"from": {"email": "client@external.example", "name": "External Client"}},
+        to=[{"email": "alex@tenant.example", "name": "Alex"}],
+        cc=[],
+        bcc=[],
+        idempotencyKey="key-project-weighted-tie",
+        correlationId="corr-project-weighted-tie",
+    )
+    task = ExtractedTaskCandidate(
+        sourceTaskId="extracted-task-1",
+        title="Prepare personnel hiring and training analysis",
+        description=(
+            "Prepare the personnel hiring and training analysis for distribution support."
+        ),
+        mentionedPeople=["Alex"],
+        dueText=None,
+        confidence=0.90,
+        evidence=["explicit_task_language"],
+    )
+    search_rank_one = _project(
+        project_id="internship",
+        name="Internship Program Support",
+        search_score=0.72,
+        search_rank=1,
+        search_margin=0.01,
+        people=[AssociatedPerson(name="Alex", email="alex@tenant.example")],
+    )
+    stronger_combined_evidence = _project(
+        project_id="distribution",
+        name="Distribution Personnel Training Support",
+        search_score=0.70,
+        search_rank=7,
+        search_margin=0.0,
+        people=[AssociatedPerson(name="Alex", email="alex@tenant.example")],
+    )
+
+    score = await score_project_candidates(
+        request,
+        [task],
+        [search_rank_one, stronger_combined_evidence],
+        thread_context=None,
+        threshold=0.80,
+    )
+
+    assert score is not None
+    assert score.project.project_id == "distribution"
+    assert "project_selection_weighted_evidence_tiebreak" in score.result.evidence
+
+
 async def test_subject_alias_rank_one_project_beats_weak_external_sender_candidate():
     request = EmailExtractionRequest(
         tenantId="tenant-1",

@@ -38,6 +38,8 @@ TASK_VERBS = [
     "provide",
     "complete",
     "draft",
+    "document",
+    "incorporate",
     "can someone",
     "could someone",
     "would someone",
@@ -67,7 +69,8 @@ GENERIC_REQUEST_RE = re.compile(
 
 ACTIONABLE_OUTCOME_RE = re.compile(
     r"\b(?:send|update|confirm|schedule|review|complete|deliver|follow\s+up|"
-    r"provide|prepare|draft|create|revise|reconcile|resolve|check|validate|"
+    r"provide|prepare|draft|document|incorporate|create|revise|reconcile|resolve|"
+    r"check|validate|"
     r"verify|investigate|analy[sz]e|clean\s+up|coordinate|brief|upload|"
     r"attach|share|route|submit|approve|close|fix|tell\s+me|let\s+me\s+know|"
     r"answer|get\b.{0,40}\bdone)\b",
@@ -97,7 +100,8 @@ CONTEXTUAL_UNRESOLVED_RE = re.compile(
 COMMAND_RE = re.compile(
     r"(?im)^\s*(?:[-*]\s*)?(?:[A-Z][a-z]+,\s*)?(?:please\s+)?"
     r"(?:send|update|confirm|schedule|review|complete|deliver|follow\s+up|"
-    r"provide|prepare|draft|create|revise|reconcile|resolve|check|validate|"
+    r"provide|prepare|draft|document|incorporate|create|revise|reconcile|resolve|"
+    r"check|validate|"
     r"verify|investigate|analy[sz]e|clean\s+up|coordinate|brief|upload|"
     r"attach|share|route|submit|approve|close|fix)\b"
 )
@@ -138,6 +142,16 @@ COURTESY_CLOSING_RE = re.compile(
 CONDITIONAL_NON_REQUEST_RE = re.compile(
     r"\bif\b.{0,100}\b(?:i|we|you)\s+(?:will\s+)?need\b",
     re.IGNORECASE,
+)
+
+FORWARDED_DELIVERY_WRAPPER_RE = re.compile(
+    r"(?is)^\s*(?:"
+    r"-{2,}\s*(?:original|forwarded)\s+message\s*-{2,}|"
+    r"begin\s+forwarded\s+message:?|"
+    r"forwarded\s+message|"
+    r">\s*from:|"
+    r"from:\s+\S"
+    r")"
 )
 
 MENTION_RE = re.compile(r"(?<!\w)@?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)")
@@ -412,6 +426,10 @@ Project context, Scope context, due date, and client rationale. Example: if the 
 "Jesse, can you handle this request below?", create the task from the forwarded client request and
 preserve that context in the task description; do not assign based on the original client's
 generic "can someone" wording.
+When forwardedDeliveryActionRequest is true, the transport sender forwarded a concrete direct
+request as the complete current message. Treat that delivery as a current handoff to the transport
+recipients. Use the forwarded request for task, Project, Scope, and due-date context, but do not
+assign work to the fictional external sender.
 Implicit business-risk language can still be a task even without "please" or "can you" wording.
 Create a task when the newest message clearly implies work is needed, such as:
 - a log, tracker, dashboard, access queue, or record has not been updated and should be corrected;
@@ -440,6 +458,9 @@ Treat completed, reconciled, refreshed, resolved, closed, cancelled, retracted, 
 clear request for additional work.
 For a forwarded handoff, use forwarded content only when the newest authored text explicitly asks
 the recipient to handle the request below. The newest authored text controls current assignment.
+When forwardedDeliveryActionRequest is true, the entire current delivery is a forwarded direct
+request. It may be reconsidered as a current handoff only because the deterministic guard verified
+concrete request language; status-only, completed, conditional, or FYI forwards remain non-tasks.
 Return only JSON matching the schema. Do not invent Projects, Scopes, assignees, due dates, or
 facts not present in the email."""
 
@@ -449,15 +470,21 @@ def _request_prompt_payload(
     recovery_reason: str | None = None,
 ) -> dict:
     newest_body, quoted_context = split_newest_and_quoted_text(request.body_text)
-    handoff = has_forwarded_actionable_handoff(request.body_text)
+    explicit_handoff = has_forwarded_actionable_handoff(request.body_text)
+    forwarded_delivery_context = _forwarded_delivery_action_context(request)
+    handoff = explicit_handoff or bool(forwarded_delivery_context)
+    forwarded_context = quoted_context if explicit_handoff else forwarded_delivery_context
     payload = {
         "subject": request.subject,
         "newestAuthoredText": newest_body,
-        "forwardedContextText": quoted_context if handoff else "",
+        "forwardedContextText": forwarded_context if handoff else "",
         "forwardedActionableHandoff": handoff,
+        "forwardedDeliveryActionRequest": bool(forwarded_delivery_context),
         "forwardedHandoffPolicy": (
-            "If forwardedActionableHandoff is true, extract the work item from the forwarded "
-            "context but use the newest authored message to determine current assignment intent."
+            "If forwardedDeliveryActionRequest is true, the transport sender's current delivery "
+            "is the handoff and the transport recipients are the current assignment context. "
+            "Otherwise, when forwardedActionableHandoff is true, extract the work item from the "
+            "forwarded context but use the newest authored message to determine assignment intent."
         ),
         "sentDateTime": request.sent_date_time.isoformat() if request.sent_date_time else None,
         "direction": request.direction,
@@ -473,6 +500,9 @@ def _request_prompt_payload(
 
 
 def _task_recovery_reason(request: EmailExtractionRequest) -> str | None:
+    if _forwarded_delivery_action_context(request):
+        return "forwarded_delivery_action_request"
+
     newest_body, _quoted_context = split_newest_and_quoted_text(request.body_text)
     authored_text = newest_body.strip() or request.subject.strip()
     if not authored_text:
@@ -515,6 +545,39 @@ def _task_recovery_reason(request: EmailExtractionRequest) -> str | None:
     if COMPLETED_WORK_RE.search(authored_text) or STATUS_ONLY_RE.search(authored_text):
         return None
     return None
+
+
+def _forwarded_delivery_action_context(request: EmailExtractionRequest) -> str:
+    body = request.body_text.strip()
+    if not body or not FORWARDED_DELIVERY_WRAPPER_RE.search(body):
+        return ""
+
+    for sentence in _action_sentences(body):
+        if (
+            NO_ACTION_RE.search(sentence)
+            or COURTESY_CLOSING_RE.search(sentence)
+            or CONDITIONAL_NON_REQUEST_RE.search(sentence)
+            or COMPLETED_WORK_RE.search(sentence)
+            or STATUS_ONLY_RE.search(sentence)
+        ):
+            continue
+        if (
+            DIRECT_REQUEST_RE.search(sentence)
+            and ACTIONABLE_OUTCOME_RE.search(sentence)
+        ) or (
+            COMMAND_RE.search(sentence)
+            and not COMPLETED_WORK_RE.search(sentence)
+        ):
+            return body
+    return ""
+
+
+def _action_sentences(value: str) -> list[str]:
+    return [
+        sentence.strip()
+        for sentence in re.split(r"(?<=[.!?])\s+|\n+", value)
+        if sentence.strip()
+    ]
 
 
 def _sum_optional_tokens(left: int | None, right: int | None) -> int | None:
