@@ -55,10 +55,12 @@ async def resolve_assignees(
     project_people_by_email = {person.email: person for person in project.people if person.email}
     task_text = " ".join([task.title, task.description, *task.mentioned_people])
     email_task_text = " ".join([request.combined_text, task_text])
-    assignment_text = " ".join([newest_authored_text(request.body_text), task_text])
+    authored_text = newest_authored_text(request.body_text)
     task_tokens = token_set(task_text)
 
-    explicit_matches = _explicit_assignment_matches(assignment_text, project.people)
+    explicit_matches = _explicit_assignment_matches(authored_text, project.people)
+    if not explicit_matches:
+        explicit_matches = _explicit_assignment_matches(task_text, project.people)
     if explicit_matches:
         if _explicit_matches_are_soft_direct(explicit_matches):
             owner_matches = _accountable_owner_matches(request, email_task_text, project)

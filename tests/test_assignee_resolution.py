@@ -421,6 +421,28 @@ async def test_sender_self_ownership_beats_single_to_recipient():
     assert "sender_self_ownership_signal" in matches[0][2]
 
 
+async def test_sender_signature_does_not_join_extracted_task_as_assignment():
+    request = _request(
+        body=(
+            "David,\n\n"
+            "Following up on our discussion, please update the Facility Security "
+            "analysis by 2026-08-22.\n\n"
+            "Best,\n"
+            "Jesse"
+        ),
+        to=[{"email": "david@tenant.com", "name": "David"}],
+        cc=[],
+        direction="received",
+        from_email="jesse@tenant.com",
+    )
+    task = _task("Update the Facility Security analysis by 2026-08-22.")
+
+    matches = await resolve_assignees(request, task, _project())
+
+    assert [match[0].email for match in matches] == ["david@tenant.com"]
+    assert "single_to_requested_outcome_assignment" in matches[0][2]
+
+
 def _project() -> ProjectContext:
     return ProjectContext(
         projectId="project-1",

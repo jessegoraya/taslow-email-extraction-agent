@@ -1,5 +1,15 @@
 # Email Extraction Agent Release Notes
 
+## v0.1.0-dev.9
+
+- Keeps authored email text and model-derived task text as separate assignee evidence sources so a
+  sender signature cannot join an extracted action title and become a false assignee.
+- Preserves sender self-assignment only through the existing explicit ownership signals.
+- Keeps highly similar task candidates separate when they carry different explicit ISO due dates,
+  preserving distinct assignees and task cardinality.
+- Leaves Project selection, Scope confidence thresholds, due-date normalization, downstream writes,
+  and stable hosted routing unchanged.
+
 ## v0.1.0-dev.8
 
 - Gives an unambiguous Scope title in the email subject precedence over longer contrasting Scope

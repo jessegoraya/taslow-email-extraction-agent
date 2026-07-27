@@ -650,6 +650,9 @@ def _merge_overlapping_tasks(
 
 
 def _should_merge_tasks(left: ExtractedTaskCandidate, right: ExtractedTaskCandidate) -> bool:
+    if _explicit_due_dates_conflict(left.due_text, right.due_text):
+        return False
+
     left_tokens = token_set(" ".join([left.title, left.description]))
     right_tokens = token_set(" ".join([right.title, right.description]))
     if not left_tokens or not right_tokens:
@@ -659,6 +662,12 @@ def _should_merge_tasks(left: ExtractedTaskCandidate, right: ExtractedTaskCandid
     people_overlap = bool(set(left.mentioned_people) & set(right.mentioned_people))
     contained = left.description in right.description or right.description in left.description
     return contained or overlap >= 0.70 or (overlap >= 0.55 and (same_due or people_overlap))
+
+
+def _explicit_due_dates_conflict(left: str | None, right: str | None) -> bool:
+    left_dates = set(re.findall(r"\b\d{4}-\d{2}-\d{2}\b", left or ""))
+    right_dates = set(re.findall(r"\b\d{4}-\d{2}-\d{2}\b", right or ""))
+    return bool(left_dates and right_dates and left_dates.isdisjoint(right_dates))
 
 
 def _merge_task_pair(
