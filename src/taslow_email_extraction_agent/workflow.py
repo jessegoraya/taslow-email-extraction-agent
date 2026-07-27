@@ -595,6 +595,13 @@ def _response(
             modelFallbackUsed=task_info.fallback_used if task_info else False,
             modelInputTokenCount=task_info.input_tokens if task_info else None,
             modelOutputTokenCount=task_info.output_tokens if task_info else None,
+            taskDetectionRecoveryAttempted=task_info.recovery_attempted
+            if task_info
+            else False,
+            taskDetectionRecoverySucceeded=task_info.recovery_succeeded
+            if task_info
+            else False,
+            taskDetectionRecoveryReason=task_info.recovery_reason if task_info else None,
             projectThreshold=services.settings.project_confidence_threshold,
             scopeThreshold=services.settings.scope_confidence_threshold,
             assigneeThreshold=services.settings.assignee_confidence_threshold,
@@ -639,6 +646,13 @@ def _retryable_response(
             modelFallbackUsed=task_info.fallback_used if task_info else False,
             modelInputTokenCount=task_info.input_tokens if task_info else None,
             modelOutputTokenCount=task_info.output_tokens if task_info else None,
+            taskDetectionRecoveryAttempted=task_info.recovery_attempted
+            if task_info
+            else False,
+            taskDetectionRecoverySucceeded=task_info.recovery_succeeded
+            if task_info
+            else False,
+            taskDetectionRecoveryReason=task_info.recovery_reason if task_info else None,
             projectThreshold=services.settings.project_confidence_threshold,
             scopeThreshold=services.settings.scope_confidence_threshold,
             assigneeThreshold=services.settings.assignee_confidence_threshold,
