@@ -70,17 +70,19 @@ GENERIC_REQUEST_RE = re.compile(
 ACTIONABLE_OUTCOME_RE = re.compile(
     r"\b(?:send|update|confirm|schedule|review|complete|deliver|follow\s+up|"
     r"provide|prepare|draft|document|incorporate|create|revise|reconcile|resolve|"
-    r"check|validate|"
+    r"check|validate|summari[sz]e|capture|finalize|assess|evaluate|compare|"
+    r"clarify|identify|flag|tighten|return|"
     r"verify|investigate|analy[sz]e|clean\s+up|coordinate|brief|upload|"
     r"attach|share|route|submit|approve|close|fix|tell\s+me|let\s+me\s+know|"
-    r"answer|get\b.{0,40}\bdone)\b",
+    r"answer|get\b.{0,40}\bdone|have\b.{0,80}\bready)\b",
     re.IGNORECASE,
 )
 
 DIRECT_REQUEST_RE = re.compile(
     r"\b(?:please|can\s+you|could\s+you|would\s+you|need\s+you\s+to|"
-    r"i\s+need|we\s+need|can\s+someone|could\s+someone|would\s+someone|"
-    r"someone\s+needs\s+to)\b",
+    r"i\s+need|we\s+need|i(?:'d|\s+would)\s+like|i\s+want\s+you\s+to|"
+    r"i(?:'m|\s+am)\s+asking\s+you\s+to|if\s+you\s+can|"
+    r"can\s+someone|could\s+someone|would\s+someone|someone\s+needs\s+to)\b",
     re.IGNORECASE,
 )
 
@@ -101,7 +103,8 @@ COMMAND_RE = re.compile(
     r"(?im)^\s*(?:[-*]\s*)?(?:[A-Z][a-z]+,\s*)?(?:please\s+)?"
     r"(?:send|update|confirm|schedule|review|complete|deliver|follow\s+up|"
     r"provide|prepare|draft|document|incorporate|create|revise|reconcile|resolve|"
-    r"check|validate|"
+    r"check|validate|summari[sz]e|capture|finalize|assess|evaluate|compare|"
+    r"clarify|identify|flag|tighten|return|"
     r"verify|investigate|analy[sz]e|clean\s+up|coordinate|brief|upload|"
     r"attach|share|route|submit|approve|close|fix)\b"
 )
@@ -148,10 +151,29 @@ FORWARDED_DELIVERY_WRAPPER_RE = re.compile(
     r"(?is)^\s*(?:"
     r"-{2,}\s*(?:original|forwarded)\s+message\s*-{2,}|"
     r"begin\s+forwarded\s+message:?|"
-    r"forwarded\s+message|"
+    r"forwarded\s+(?:message|note):?|"
     r">\s*from:|"
+    r">\s*forwarded\s+(?:message|note):?|"
     r"from:\s+\S"
     r")"
+)
+
+DELIVERABLE_REQUEST_RE = re.compile(
+    r"\b(?:analysis|assessment|brief|comments?|deliverable|document|draft|edits?|"
+    r"evidence|findings?|matrix|notes?|package|plan|readout|report|response|"
+    r"review|summary|tracker|update|write-?up)\b.{0,100}"
+    r"\b(?:back|completed|done|due|finalized|ready|returned|submitted)\b"
+    r".{0,40}\b(?:by|before|today|tomorrow|monday|tuesday|wednesday|thursday|"
+    r"friday|saturday|sunday|\d{4}-\d{2}-\d{2})\b",
+    re.IGNORECASE,
+)
+
+ACTION_TOKEN_RE = re.compile(
+    r"\b(?:analy[sz]e|approve|assess|capture|check|clarify|close|compare|complete|"
+    r"confirm|coordinate|create|deliver|document|draft|evaluate|finalize|fix|"
+    r"identify|investigate|prepare|provide|reconcile|resolve|return|review|"
+    r"schedule|send|share|submit|summari[sz]e|update|validate|verify)\b",
+    re.IGNORECASE,
 )
 
 MENTION_RE = re.compile(r"(?<!\w)@?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)")
@@ -535,6 +557,12 @@ def _task_recovery_reason(request: EmailExtractionRequest) -> str | None:
         ):
             return "unresolved_work_signal"
         if (
+            DELIVERABLE_REQUEST_RE.search(sentence)
+            and not COMPLETED_WORK_RE.search(sentence)
+            and not STATUS_ONLY_RE.search(authored_text)
+        ):
+            return "deliverable_deadline_request"
+        if (
             CONTEXTUAL_UNRESOLVED_RE.search(sentence)
             and has_outcome
             and not COMPLETED_WORK_RE.search(sentence)
@@ -658,10 +686,22 @@ def _should_merge_tasks(left: ExtractedTaskCandidate, right: ExtractedTaskCandid
     if not left_tokens or not right_tokens:
         return False
     overlap = len(left_tokens & right_tokens) / max(1, min(len(left_tokens), len(right_tokens)))
-    same_due = (left.due_text or "").lower() == (right.due_text or "").lower()
-    people_overlap = bool(set(left.mentioned_people) & set(right.mentioned_people))
-    contained = left.description in right.description or right.description in left.description
-    return contained or overlap >= 0.70 or (overlap >= 0.55 and (same_due or people_overlap))
+    left_actions = {match.lower() for match in ACTION_TOKEN_RE.findall(
+        " ".join([left.title, left.description])
+    )}
+    right_actions = {match.lower() for match in ACTION_TOKEN_RE.findall(
+        " ".join([right.title, right.description])
+    )}
+    same_actions = bool(left_actions) and left_actions == right_actions
+    left_description = " ".join(left.description.lower().split())
+    right_description = " ".join(right.description.lower().split())
+    contained = (
+        left_description in right_description or right_description in left_description
+    )
+    exact_title = " ".join(left.title.lower().split()) == " ".join(
+        right.title.lower().split()
+    )
+    return exact_title or (same_actions and (contained or overlap >= 0.70))
 
 
 def _explicit_due_dates_conflict(left: str | None, right: str | None) -> bool:

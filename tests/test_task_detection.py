@@ -90,6 +90,37 @@ def test_recovery_guard_detects_forwarded_delivery_action_request(base_request):
     assert _task_recovery_reason(base_request) == "forwarded_delivery_action_request"
 
 
+def test_recovery_guard_detects_forwarded_note_delivery_request(base_request):
+    base_request.body_text = (
+        "Forwarded note:\n\n"
+        "From: External Program Lead\n"
+        "Subject: Facility security review\n\n"
+        "Please summarize the Facility Security analysis and return it by 2026-08-17."
+    )
+
+    assert _task_recovery_reason(base_request) == "forwarded_delivery_action_request"
+
+
+def test_recovery_guard_detects_quoted_request_with_current_handoff(base_request):
+    base_request.body_text = (
+        "Tessa,\n\n"
+        "> Please draft the Facility Security analysis by 2026-08-17.\n"
+        "> Include any unclear controls in the response.\n\n"
+        "I am passing this along so you have the current direction and can work from it."
+    )
+
+    assert _task_recovery_reason(base_request) == "forwarded_actionable_handoff"
+
+
+def test_recovery_guard_detects_deliverable_deadline_request(base_request):
+    base_request.body_text = (
+        "The transition discussion is captured below. "
+        "Please have the analysis ready by 2026-08-17."
+    )
+
+    assert _task_recovery_reason(base_request) == "direct_action_request"
+
+
 def test_recovery_guard_rejects_forwarded_delivery_status(base_request):
     base_request.body_text = (
         "Begin forwarded message:\n"
@@ -313,6 +344,33 @@ def test_overlapping_tasks_with_distinct_explicit_due_dates_remain_separate():
 
     assert len(merged) == 2
     assert [task.due_text for task in merged] == ["2026-08-13", "2026-08-14"]
+
+
+def test_distinct_task_outcomes_with_same_owner_and_due_date_remain_separate():
+    candidates = [
+        ExtractedTaskCandidate(
+            sourceTaskId="task-1",
+            title="Analyze the facility security controls",
+            description="Analyze the facility security controls before Friday.",
+            mentionedPeople=["David"],
+            dueText="2026-08-22",
+            confidence=0.94,
+            evidence=["direct_request"],
+        ),
+        ExtractedTaskCandidate(
+            sourceTaskId="task-2",
+            title="Summarize the facility security controls",
+            description="Summarize the facility security controls before Friday.",
+            mentionedPeople=["David"],
+            dueText="2026-08-22",
+            confidence=0.94,
+            evidence=["direct_request"],
+        ),
+    ]
+
+    merged = _merge_overlapping_tasks(candidates)
+
+    assert len(merged) == 2
 
 
 def test_duplicate_tasks_with_same_due_date_still_merge():
