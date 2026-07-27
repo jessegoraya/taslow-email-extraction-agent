@@ -1,5 +1,17 @@
 # Email Extraction Agent Release Notes
 
+## v0.1.0-dev.5
+
+- Adds a fail-closed second-pass task-detection recovery for strong action signals that the first
+  model pass classified as `no_task_found`.
+- Limits model input to newest authored content and explicitly delegated forwarded context so stale
+  quoted requests cannot create new tasks.
+- Rejects completed work, informational/status-only mail, courtesy closings, and conditional future
+  needs before recovery.
+- Adds recovery attempt, outcome, and reason diagnostics plus a sealed-tranche audit tool.
+- Preserves all existing Project, Scope, assignee, validation, and write gates; this release does
+  not weaken project-selection thresholds or activate downstream writes.
+
 ## v0.1.0-dev.4
 
 - Fixes Foundry session startup by installing the `src`-layout runtime package as a portable wheel instead of an editable build-workspace link.

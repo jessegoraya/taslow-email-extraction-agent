@@ -241,6 +241,15 @@ class ExtractionDiagnostics(BaseModel):
     model_fallback_used: bool = Field(default=False, alias="modelFallbackUsed")
     model_input_token_count: int | None = Field(default=None, alias="modelInputTokenCount")
     model_output_token_count: int | None = Field(default=None, alias="modelOutputTokenCount")
+    task_detection_recovery_attempted: bool = Field(
+        default=False, alias="taskDetectionRecoveryAttempted"
+    )
+    task_detection_recovery_succeeded: bool = Field(
+        default=False, alias="taskDetectionRecoverySucceeded"
+    )
+    task_detection_recovery_reason: str | None = Field(
+        default=None, alias="taskDetectionRecoveryReason"
+    )
     project_threshold: float = Field(alias="projectThreshold")
     scope_threshold: float = Field(alias="scopeThreshold")
     assignee_threshold: float = Field(alias="assigneeThreshold")

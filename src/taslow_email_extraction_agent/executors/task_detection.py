@@ -74,6 +74,72 @@ ACTIONABLE_OUTCOME_RE = re.compile(
     re.IGNORECASE,
 )
 
+DIRECT_REQUEST_RE = re.compile(
+    r"\b(?:please|can\s+you|could\s+you|would\s+you|need\s+you\s+to|"
+    r"i\s+need|we\s+need|can\s+someone|could\s+someone|would\s+someone|"
+    r"someone\s+needs\s+to)\b",
+    re.IGNORECASE,
+)
+
+UNRESOLVED_WORK_RE = re.compile(
+    r"\b(?:open\s+item|remaining\s+gap|still\s+outstanding|remains?\s+outstanding|"
+    r"overdue|at\s+risk\s+of\s+slipping|needs?\s+(?:attention|resolution|an?\s+update)|"
+    r"needs?\s+to\s+be\s+(?:updated|refreshed|reconciled|resolved|completed|"
+    r"reviewed|prepared|submitted|closed|fixed))\b",
+    re.IGNORECASE,
+)
+
+CONTEXTUAL_UNRESOLVED_RE = re.compile(
+    r"\b(?:pending|not\s+yet|has\s+not\s+been|have\s+not\s+been)\b",
+    re.IGNORECASE,
+)
+
+COMMAND_RE = re.compile(
+    r"(?im)^\s*(?:[-*]\s*)?(?:[A-Z][a-z]+,\s*)?(?:please\s+)?"
+    r"(?:send|update|confirm|schedule|review|complete|deliver|follow\s+up|"
+    r"provide|prepare|draft|create|revise|reconcile|resolve|check|validate|"
+    r"verify|investigate|analy[sz]e|clean\s+up|coordinate|brief|upload|"
+    r"attach|share|route|submit|approve|close|fix)\b"
+)
+
+COMPLETED_WORK_RE = re.compile(
+    r"\b(?:already\s+(?:handled|completed|resolved|closed|done)|"
+    r"(?:has|have)\s+been\s+(?:completed|resolved|closed|reconciled|updated|"
+    r"refreshed|prepared|reviewed|validated|submitted)|"
+    r"(?:is|are)\s+(?:complete|completed|resolved|closed|done)|"
+    r"completed\s+(?:the|a|an|my|our)\b|"
+    r"no\s+(?:further\s+)?action\s+(?:is\s+)?(?:needed|required)|"
+    r"work\s+is\s+already\s+handled|cancel(?:led|ed)|withdrawn|retracted)\b",
+    re.IGNORECASE,
+)
+
+STATUS_ONLY_RE = re.compile(
+    r"\b(?:fyi|for\s+your\s+information|simple\s+check-in|status\s+(?:note|update)|"
+    r"sharing\s+(?:a|the)\s+(?:brief\s+)?(?:update|summary)|"
+    r"keeping\s+this\s+as\s+a\s+(?:simple\s+)?check-in)\b",
+    re.IGNORECASE,
+)
+
+NO_ACTION_RE = re.compile(
+    r"\b(?:no|nothing)\s+(?:further\s+|additional\s+|new\s+)?"
+    r"(?:action|follow-up|follow\s+up|next\s+steps?|work|response)\s+"
+    r"(?:is\s+)?(?:needed|required|requested)|"
+    r"\b(?:i(?:'m|\s+am)\s+not\s+asking|not\s+asking)\s+for\s+anything\b",
+    re.IGNORECASE,
+)
+
+COURTESY_CLOSING_RE = re.compile(
+    r"\b(?:please\s+)?let\s+me\s+know\s+if\s+you\s+"
+    r"(?:have\s+(?:any\s+)?questions|want\s+me\s+to|need\s+anything)|"
+    r"\bfeel\s+free\s+to\s+(?:reach\s+out|ask)\b",
+    re.IGNORECASE,
+)
+
+CONDITIONAL_NON_REQUEST_RE = re.compile(
+    r"\bif\b.{0,100}\b(?:i|we|you)\s+(?:will\s+)?need\b",
+    re.IGNORECASE,
+)
+
 MENTION_RE = re.compile(r"(?<!\w)@?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)")
 DUE_RE = re.compile(
     r"\b(?:by|before|due|tomorrow|today|next\s+\w+|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b[^.;,\n]*",
@@ -97,6 +163,9 @@ class TaskExtractionRunInfo:
     output_tokens: int | None = None
     schema_valid: bool = True
     warning: str | None = None
+    recovery_attempted: bool = False
+    recovery_succeeded: bool = False
+    recovery_reason: str | None = None
 
 
 class HeuristicTaskExtractor:
@@ -166,6 +235,50 @@ class FoundryTaskExtractor:
 
         try:
             candidates, input_tokens, output_tokens = await self._extract_with_model(request)
+            recovery_reason = _task_recovery_reason(request) if not candidates else None
+            recovery_attempted = recovery_reason is not None
+            recovery_succeeded = False
+            warning = None
+            if recovery_reason:
+                try:
+                    recovered, recovery_input_tokens, recovery_output_tokens = (
+                        await self._extract_with_model(
+                            request,
+                            system_prompt=_RECOVERY_SYSTEM_PROMPT,
+                            recovery_reason=recovery_reason,
+                        )
+                    )
+                    input_tokens = _sum_optional_tokens(input_tokens, recovery_input_tokens)
+                    output_tokens = _sum_optional_tokens(output_tokens, recovery_output_tokens)
+                    candidates = [
+                        candidate.model_copy(
+                            update={
+                                "evidence": list(
+                                    dict.fromkeys(
+                                        [
+                                            *candidate.evidence,
+                                            "task_detection_recovery",
+                                            recovery_reason,
+                                        ]
+                                    )
+                                )
+                            }
+                        )
+                        for candidate in recovered
+                    ]
+                    recovery_succeeded = bool(candidates)
+                except (
+                    ClientAuthenticationError,
+                    httpx.HTTPError,
+                    ValueError,
+                    KeyError,
+                    TypeError,
+                    json.JSONDecodeError,
+                ) as recovery_error:
+                    warning = (
+                        "task_detection_recovery_failed:"
+                        f"{type(recovery_error).__name__}"
+                    )
             self.last_run_info = TaskExtractionRunInfo(
                 provider=self._settings.agent_task_extractor_provider,
                 model_deployment=self._settings.azure_ai_model_deployment_name,
@@ -173,6 +286,10 @@ class FoundryTaskExtractor:
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
                 schema_valid=True,
+                warning=warning,
+                recovery_attempted=recovery_attempted,
+                recovery_succeeded=recovery_succeeded,
+                recovery_reason=recovery_reason,
             )
             return candidates
         except (
@@ -194,7 +311,10 @@ class FoundryTaskExtractor:
         return self._authenticator.is_configured
 
     async def _extract_with_model(
-        self, request: EmailExtractionRequest
+        self,
+        request: EmailExtractionRequest,
+        system_prompt: str | None = None,
+        recovery_reason: str | None = None,
     ) -> tuple[list[ExtractedTaskCandidate], int | None, int | None]:
         endpoint = self._settings.azure_openai_endpoint
         assert endpoint is not None
@@ -210,11 +330,14 @@ class FoundryTaskExtractor:
             "messages": [
                 {
                     "role": "system",
-                    "content": _SYSTEM_PROMPT,
+                    "content": system_prompt or _SYSTEM_PROMPT,
                 },
                 {
                     "role": "user",
-                    "content": json.dumps(_request_prompt_payload(request), ensure_ascii=True),
+                    "content": json.dumps(
+                        _request_prompt_payload(request, recovery_reason),
+                        ensure_ascii=True,
+                    ),
                 },
             ],
             "temperature": 0,
@@ -305,13 +428,30 @@ combined context. Extract multiple tasks only when the email clearly assigns sep
 could be completed independently by different owners or at different times.
 Do not invent projects, assignees, due dates, or facts not present in the email."""
 
+_RECOVERY_SYSTEM_PROMPT = """You are the conservative second-pass task detector for Taslow.
+The first pass returned no tasks. Reconsider the email only because a deterministic runtime guard
+found a strong action signal in the newest authored content. Return a task only when that content
+directly requests, assigns, or identifies unresolved work with a concrete business outcome.
+An implicit request can be actionable without the words "please" or "can you", but a Project
+description, status report, completed analysis, current-state summary, future contract requirement,
+or quoted prior instruction is not a new task.
+Treat completed, reconciled, refreshed, resolved, closed, cancelled, retracted, FYI-only, and
+"no action needed" content as non-actionable unless the newest authored text contains a separate
+clear request for additional work.
+For a forwarded handoff, use forwarded content only when the newest authored text explicitly asks
+the recipient to handle the request below. The newest authored text controls current assignment.
+Return only JSON matching the schema. Do not invent Projects, Scopes, assignees, due dates, or
+facts not present in the email."""
 
-def _request_prompt_payload(request: EmailExtractionRequest) -> dict:
+
+def _request_prompt_payload(
+    request: EmailExtractionRequest,
+    recovery_reason: str | None = None,
+) -> dict:
     newest_body, quoted_context = split_newest_and_quoted_text(request.body_text)
     handoff = has_forwarded_actionable_handoff(request.body_text)
-    return {
+    payload = {
         "subject": request.subject,
-        "bodyText": request.body_text,
         "newestAuthoredText": newest_body,
         "forwardedContextText": quoted_context if handoff else "",
         "forwardedActionableHandoff": handoff,
@@ -327,6 +467,60 @@ def _request_prompt_payload(request: EmailExtractionRequest) -> dict:
         "conversationId": request.conversation_id,
         "parentMessageId": request.parent_message_id,
     }
+    if recovery_reason:
+        payload["taskDetectionRecoveryReason"] = recovery_reason
+    return payload
+
+
+def _task_recovery_reason(request: EmailExtractionRequest) -> str | None:
+    newest_body, _quoted_context = split_newest_and_quoted_text(request.body_text)
+    authored_text = newest_body.strip() or request.subject.strip()
+    if not authored_text:
+        return None
+
+    if has_forwarded_actionable_handoff(request.body_text):
+        return "forwarded_actionable_handoff"
+
+    sentences = [
+        sentence.strip()
+        for sentence in re.split(r"(?<=[.!?])\s+|\n+", authored_text)
+        if sentence.strip()
+    ]
+    for sentence in sentences:
+        if (
+            NO_ACTION_RE.search(sentence)
+            or COURTESY_CLOSING_RE.search(sentence)
+            or CONDITIONAL_NON_REQUEST_RE.search(sentence)
+        ):
+            continue
+        has_outcome = bool(ACTIONABLE_OUTCOME_RE.search(sentence))
+        if DIRECT_REQUEST_RE.search(sentence) and has_outcome:
+            return "direct_action_request"
+        if COMMAND_RE.search(sentence) and not COMPLETED_WORK_RE.search(sentence):
+            return "imperative_action_request"
+        if (
+            UNRESOLVED_WORK_RE.search(sentence)
+            and not COMPLETED_WORK_RE.search(sentence)
+            and not STATUS_ONLY_RE.search(authored_text)
+        ):
+            return "unresolved_work_signal"
+        if (
+            CONTEXTUAL_UNRESOLVED_RE.search(sentence)
+            and has_outcome
+            and not COMPLETED_WORK_RE.search(sentence)
+            and not STATUS_ONLY_RE.search(authored_text)
+        ):
+            return "unresolved_work_signal"
+
+    if COMPLETED_WORK_RE.search(authored_text) or STATUS_ONLY_RE.search(authored_text):
+        return None
+    return None
+
+
+def _sum_optional_tokens(left: int | None, right: int | None) -> int | None:
+    if left is None and right is None:
+        return None
+    return (left or 0) + (right or 0)
 
 
 _TASK_EXTRACTION_SCHEMA = {
