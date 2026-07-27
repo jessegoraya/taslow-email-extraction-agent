@@ -57,6 +57,125 @@ async def test_external_sender_can_match_project_when_project_person_and_search_
     assert "external_sender_allowed_with_project_people_context" in score.result.evidence
 
 
+async def test_equal_confidence_prefers_stronger_project_participant_overlap():
+    request = EmailExtractionRequest(
+        tenantId="tenant-1",
+        mailbox="alex@tenant.example",
+        direction="received",
+        graphEventId="graph-project-tie",
+        internetMessageId="<project-tie@example.com>",
+        messageId="project-tie",
+        subject="Draft analysis follow-up",
+        bodyText="Please prepare the draft analysis for the next review.",
+        **{"from": {"email": "client@external.example", "name": "External Client"}},
+        to=[{"email": "alex@tenant.example", "name": "Alex"}],
+        cc=[],
+        bcc=[],
+        idempotencyKey="key-project-tie",
+        correlationId="corr-project-tie",
+    )
+    task = ExtractedTaskCandidate(
+        sourceTaskId="extracted-task-1",
+        title="Prepare the draft analysis",
+        description="Prepare the draft analysis for the next review.",
+        mentionedPeople=["Alex"],
+        dueText=None,
+        confidence=0.90,
+        evidence=["explicit_task_language"],
+    )
+    weaker_overlap = _project(
+        project_id="search-rank-one",
+        name="Operations Planning Support",
+        search_score=0.72,
+        search_rank=1,
+        search_margin=0.01,
+        people=[AssociatedPerson(name="Alex", email="alex@tenant.example")],
+    )
+    stronger_overlap = _project(
+        project_id="participant-match",
+        name="Program Review Support",
+        search_score=0.69,
+        search_rank=7,
+        search_margin=0.0,
+        people=[
+            AssociatedPerson(name="Alex", email="alex@tenant.example"),
+            AssociatedPerson(name="External Client", email="client@external.example"),
+        ],
+    )
+
+    score = await score_project_candidates(
+        request,
+        [task],
+        [weaker_overlap, stronger_overlap],
+        thread_context=None,
+        threshold=0.80,
+    )
+
+    assert score is not None
+    assert score.project.project_id == "participant-match"
+    assert score.result.confidence == 0.81
+    assert "project_selection_participant_tiebreak" in score.result.evidence
+
+
+async def test_equal_confidence_and_participants_preserve_search_order():
+    request = EmailExtractionRequest(
+        tenantId="tenant-1",
+        mailbox="alex@tenant.example",
+        direction="received",
+        graphEventId="graph-project-stable",
+        internetMessageId="<project-stable@example.com>",
+        messageId="project-stable",
+        subject="Draft analysis follow-up",
+        bodyText="Please prepare the draft analysis for the next review.",
+        **{"from": {"email": "client@external.example", "name": "External Client"}},
+        to=[
+            {"email": "alex@tenant.example", "name": "Alex"},
+            {"email": "beth@tenant.example", "name": "Beth"},
+        ],
+        cc=[],
+        bcc=[],
+        idempotencyKey="key-project-stable",
+        correlationId="corr-project-stable",
+    )
+    task = ExtractedTaskCandidate(
+        sourceTaskId="extracted-task-1",
+        title="Prepare the draft analysis",
+        description="Prepare the draft analysis for the next review.",
+        mentionedPeople=["Alex"],
+        dueText=None,
+        confidence=0.90,
+        evidence=["explicit_task_language"],
+    )
+    search_rank_one = _project(
+        project_id="search-rank-one",
+        name="Operations Planning Support",
+        search_score=0.72,
+        search_rank=1,
+        search_margin=0.01,
+        people=[AssociatedPerson(name="Alex", email="alex@tenant.example")],
+    )
+    later_candidate = _project(
+        project_id="later-candidate",
+        name="Program Review Support",
+        search_score=0.69,
+        search_rank=7,
+        search_margin=0.0,
+        people=[AssociatedPerson(name="Alex", email="alex@tenant.example")],
+    )
+
+    score = await score_project_candidates(
+        request,
+        [task],
+        [search_rank_one, later_candidate],
+        thread_context=None,
+        threshold=0.80,
+    )
+
+    assert score is not None
+    assert score.project.project_id == "search-rank-one"
+    assert "project_selection_participant_tiebreak" not in score.result.evidence
+
+
 async def test_subject_alias_rank_one_project_beats_weak_external_sender_candidate():
     request = EmailExtractionRequest(
         tenantId="tenant-1",

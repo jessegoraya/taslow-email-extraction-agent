@@ -1,5 +1,16 @@
 # Email Extraction Agent Release Notes
 
+## v0.1.0-dev.6
+
+- Expands tenant-filtered Project retrieval from eight to twenty-five Search candidates so the
+  21-Project BloomSky Test workspace can be evaluated without dropping relevant Projects before
+  scoring.
+- Resolves equal-confidence Project candidates with stronger participant overlap and then stronger
+  associated-people context while preserving Search order when those signals are equal.
+- Adds `project_selection_participant_tiebreak` evidence whenever the deterministic tie-break
+  changes the selected Project.
+- Leaves Scope selection, due-date normalization, and downstream-write policy unchanged.
+
 ## v0.1.0-dev.5
 
 - Adds a fail-closed second-pass task-detection recovery for strong action signals that the first
