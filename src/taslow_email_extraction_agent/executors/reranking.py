@@ -26,6 +26,7 @@ STRONG_DETERMINISTIC_ASSIGNEE_EVIDENCE = {
     "subject_matter_owner_signal",
     "requested_actor_assignment_language",
     "named_request_actor_signal",
+    "named_deliverable_source_assignment",
     "beneficiary_or_owner_signal",
 }
 HIGH_DETERMINISTIC_SCOPE_CONFIDENCE = 0.86

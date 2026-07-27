@@ -58,6 +58,18 @@ async def resolve_assignees(
     authored_text = newest_authored_text(request.body_text)
     task_tokens = token_set(task_text)
 
+    named_deliverable_matches = _named_deliverable_from_matches(
+        _task_local_assignment_text(authored_text, task),
+        project.people,
+    )
+    if not named_deliverable_matches:
+        named_deliverable_matches = _named_deliverable_from_matches(
+            task_text,
+            project.people,
+        )
+    if named_deliverable_matches:
+        return named_deliverable_matches
+
     explicit_matches = _explicit_assignment_matches(authored_text, project.people)
     if not explicit_matches:
         explicit_matches = _explicit_assignment_matches(task_text, project.people)
@@ -218,6 +230,76 @@ def _explicit_matches_are_soft_direct(
     return bool(matches) and all(
         set(evidence).issubset(soft_evidence) for _p, _s, evidence in matches
     )
+
+
+def _task_local_assignment_text(
+    authored_text: str,
+    task: ExtractedTaskCandidate,
+) -> str:
+    due_text = (task.due_text or "").strip()
+    if not authored_text or not due_text:
+        return ""
+
+    anchor_start = authored_text.lower().find(due_text.lower())
+    if anchor_start < 0:
+        return ""
+
+    boundaries = [0]
+    boundaries.extend(
+        match.end()
+        for match in re.finditer(
+            r"(?:\r?\n){2,}|(?<=[.!?])\s+(?=[A-ZI])",
+            authored_text,
+        )
+    )
+    boundaries.append(len(authored_text))
+    start = max(boundary for boundary in boundaries if boundary <= anchor_start)
+    end = min(boundary for boundary in boundaries if boundary > anchor_start)
+    return authored_text[start:end].strip()
+
+
+def _named_deliverable_from_matches(
+    task_local_text: str,
+    project_people: list[AssociatedPerson],
+) -> list[tuple[AssociatedPerson, float, list[str]]]:
+    normalized = task_local_text.strip()
+    if not normalized:
+        return []
+
+    deliverable = (
+        r"(?:analysis|brief|deliverable|draft|follow[- ]up|package|readout|"
+        r"report|response|review|summary|update|write[- ]?up)"
+    )
+    request_prefix = (
+        r"(?:i|we)\s+(?:need|want|would\s+like)|"
+        r"(?:i|we)['’]d\s+like|"
+        r"(?:need|want|request|please\s+(?:provide|prepare|produce|send))"
+    )
+    action_prefix = r"(?:create|deliver|draft|prepare|produce|provide|send|summari[sz]e)"
+
+    matches: list[tuple[AssociatedPerson, float, list[str]]] = []
+    for person in project_people:
+        if not person.email:
+            continue
+        for reference in _person_reference_variants(person):
+            reference_pattern = re.escape(reference)
+            patterns = [
+                rf"\b(?:{request_prefix})\b.{{0,140}}\b{deliverable}\b"
+                rf".{{0,120}}\bfrom\s+@?{reference_pattern}\b",
+                rf"\b{action_prefix}\b.{{0,140}}\b(?:from|by)\s+"
+                rf"@?{reference_pattern}\b",
+            ]
+            if any(re.search(pattern, normalized, re.IGNORECASE) for pattern in patterns):
+                matches.append(
+                    (
+                        person,
+                        0.97,
+                        ["named_deliverable_source_assignment"],
+                    )
+                )
+                break
+
+    return matches if len(matches) == 1 else []
 
 
 def _has_strong_owner_evidence(
@@ -669,9 +751,15 @@ def _is_context_reviewer_or_delivery_target_only(
 def _has_sender_self_ownership_signal(text: str) -> bool:
     return bool(
         re.search(
-            r"\b(?:i|we)\b.{0,80}\b(?:will|['’]ll|can\s+take|"
-            r"can\s+handle|will\s+handle|own|am\s+working|are\s+working|"
-            r"am\s+going\s+to|are\s+going\s+to)\b",
+            r"\b(?:"
+            r"(?:(?:i|we)\s+will|(?:i|we)['’]ll)\s+"
+            r"(?:analy[sz]e|complete|create|deliver|draft|handle|own|prepare|"
+            r"produce|provide|review|send|summari[sz]e|take|update)|"
+            r"i\s+can\s+(?:handle|own|take)|"
+            r"we\s+can\s+(?:handle|own|take)|"
+            r"i\s+am\s+(?:working\s+on|going\s+to\s+(?:handle|own|take))|"
+            r"we\s+are\s+(?:working\s+on|going\s+to\s+(?:handle|own|take))"
+            r")\b",
             text,
             re.IGNORECASE,
         )
