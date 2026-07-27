@@ -1,5 +1,14 @@
 # Email Extraction Agent Release Notes
 
+## v0.1.0-dev.8
+
+- Gives an unambiguous Scope title in the email subject precedence over longer contrasting Scope
+  references in the authored body.
+- Keeps ambiguous duplicate subject matches fail-closed and continues to ignore stale quoted Scope
+  references.
+- Leaves Project selection, task detection, assignee resolution, due-date handling, and runtime
+  activation unchanged.
+
 ## v0.1.0-dev.7
 
 - Recognizes a bare forwarded delivery as a current handoff only when a deterministic guard finds
