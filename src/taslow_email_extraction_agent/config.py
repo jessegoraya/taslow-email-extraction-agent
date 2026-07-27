@@ -55,7 +55,7 @@ class Settings(BaseSettings):
     azure_openai_embedding_dimensions: int = Field(
         default=1536, alias="AZURE_OPENAI_EMBEDDING_DIMENSIONS"
     )
-    project_search_top_k: int = Field(default=8, alias="PROJECT_SEARCH_TOP_K")
+    project_search_top_k: int = Field(default=25, alias="PROJECT_SEARCH_TOP_K")
     scope_search_top_k: int = Field(default=5, alias="SCOPE_SEARCH_TOP_K")
     agent_search_dependency_retry_enabled: bool = Field(
         default=True, alias="AGENT_SEARCH_DEPENDENCY_RETRY_ENABLED"

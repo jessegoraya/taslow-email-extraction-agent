@@ -58,6 +58,8 @@ async def test_search_and_embedding_requests_use_entra_tokens_and_tenant_filter(
         assert "tenantId eq 'tenant-1'" in payload["filter"]
         assert "entityType eq 'project'" in payload["filter"]
         assert payload["vectorFilterMode"] == "preFilter"
+        assert payload["top"] == 25
+        assert payload["vectorQueries"][0]["k"] == 25
         return httpx.Response(
             200,
             json={

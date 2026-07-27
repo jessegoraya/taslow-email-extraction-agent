@@ -65,15 +65,41 @@ async def score_project_candidates(
         )
         for project in projects
     ]
-    best = max(scored, key=lambda item: item.result.confidence)
+    confidence_best = max(scored, key=lambda item: item.result.confidence)
+    best = max(scored, key=_project_selection_key)
+    if (
+        best.project.project_id != confidence_best.project.project_id
+        and best.result.confidence == confidence_best.result.confidence
+    ):
+        best.result = best.result.model_copy(
+            update={
+                "evidence": list(
+                    dict.fromkeys(
+                        [
+                            *best.result.evidence,
+                            "project_selection_participant_tiebreak",
+                        ]
+                    )
+                )
+            }
+        )
     candidate_results = [
         item.result
-        for item in sorted(scored, key=lambda item: item.result.confidence, reverse=True)
+        for item in sorted(scored, key=_project_selection_key, reverse=True)
     ]
     return ProjectScore(
         project=best.project,
         result=best.result,
         candidate_results=candidate_results,
+    )
+
+
+def _project_selection_key(item: ProjectScore) -> tuple[float, float, float]:
+    result = item.result
+    return (
+        result.confidence,
+        result.participant_score or 0.0,
+        result.people_context_score or 0.0,
     )
 
 
