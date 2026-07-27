@@ -1,5 +1,15 @@
 # Email Extraction Agent Release Notes
 
+## v0.1.0-dev.10
+
+- Requires sender self-ownership language to name the action the sender will perform, preventing
+  courtesy closings such as "I'll respond" from overriding a directly addressed recipient.
+- Recognizes an explicitly requested deliverable "from" a named project person as assignee evidence
+  within the individual task's due-date sentence.
+- Keeps named ownership in one multi-task sentence from leaking into another task in the same email.
+- Leaves Project selection, Scope selection, due-date normalization, downstream writes, and stable
+  hosted routing unchanged.
+
 ## v0.1.0-dev.9
 
 - Keeps authored email text and model-derived task text as separate assignee evidence sources so a

@@ -443,6 +443,61 @@ async def test_sender_signature_does_not_join_extracted_task_as_assignment():
     assert "single_to_requested_outcome_assignment" in matches[0][2]
 
 
+async def test_courtesy_ill_respond_does_not_claim_recipient_task():
+    request = _request(
+        body=(
+            "Hi David,\n\n"
+            "I need you to update the operations analysis for the current review. "
+            "Please have it back by 2026-08-20. If you need anything from me, "
+            "I'll respond as soon as I can.\n\n"
+            "Best,\nJesse"
+        ),
+        to=[{"email": "david@tenant.com", "name": "David"}],
+        cc=[],
+        direction="received",
+        from_email="jesse@tenant.com",
+    )
+    task = _task(
+        "Update the operations analysis for the current review.",
+        due_text="2026-08-20",
+    )
+
+    matches = await resolve_assignees(request, task, _project())
+
+    assert [match[0].email for match in matches] == ["david@tenant.com"]
+    assert "sender_self_ownership_signal" not in matches[0][2]
+
+
+async def test_named_deliverable_from_person_is_local_to_matching_due_date():
+    request = _request(
+        body=(
+            "Hi David,\n\n"
+            "First, please analyze the property section by 2026-08-13. "
+            "In parallel, I'd like a summary of that same section from Jesse "
+            "by 2026-08-14 so we have both items in hand.\n\n"
+            "Best,\nTaylor"
+        ),
+        to=[{"email": "david@tenant.com", "name": "David"}],
+        cc=[],
+        direction="received",
+    )
+    first_task = _task(
+        "Analyze the property section.",
+        due_text="2026-08-13",
+    )
+    second_task = _task(
+        "Provide a summary of the property section.",
+        due_text="2026-08-14",
+    )
+
+    first_matches = await resolve_assignees(request, first_task, _project())
+    second_matches = await resolve_assignees(request, second_task, _project())
+
+    assert [match[0].email for match in first_matches] == ["david@tenant.com"]
+    assert [match[0].email for match in second_matches] == ["jesse@tenant.com"]
+    assert "named_deliverable_source_assignment" in second_matches[0][2]
+
+
 def _project() -> ProjectContext:
     return ProjectContext(
         projectId="project-1",
@@ -562,13 +617,16 @@ def _request(
     )
 
 
-def _task(description: str) -> ExtractedTaskCandidate:
+def _task(
+    description: str,
+    due_text: str | None = None,
+) -> ExtractedTaskCandidate:
     return ExtractedTaskCandidate(
         sourceTaskId="task-1",
         title=description,
         description=description,
         mentionedPeople=[],
-        dueText=None,
+        dueText=due_text,
         confidence=0.9,
         evidence=["implicit_task_language"],
     )
