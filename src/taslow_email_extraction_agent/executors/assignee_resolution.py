@@ -30,10 +30,10 @@ GENERIC_REQUEST_RE = re.compile(
 
 ACTIONABLE_OUTCOME_RE = re.compile(
     r"\b(?:"
-    r"perform|produce|send|update|confirm|schedule|review|complete|deliver|"
+    r"perform|produce|send|update|confirm|schedule|review|complete|deliver|document|"
     r"follow\s+up|provide|prepare|draft|create|revise|reconcile|resolve|"
     r"check|validate|verify|investigate|analy[sz]e|clean\s+up|coordinate|"
-    r"brief|upload|attach|share|route|submit|approve|close|fix|tell\s+me|"
+    r"brief|upload|attach|share|route|submit|approve|close|fix|summari[sz]e|tell\s+me|"
     r"let\s+me\s+know|answer|get\b.{0,40}\bdone"
     r")\b",
     re.IGNORECASE,
@@ -55,12 +55,19 @@ async def resolve_assignees(
     visible_recipients = [p for p in request.visible_recipients if p.email]
     project_people_by_email = {person.email: person for person in project.people if person.email}
     task_text = " ".join([task.title, task.description, *task.mentioned_people])
-    email_task_text = " ".join([request.combined_text, task_text])
     authored_text = newest_authored_text(request.body_text)
+    local_assignment_text = _task_local_assignment_text(authored_text, task)
+    email_task_text = " ".join(
+        [
+            request.subject,
+            local_assignment_text or authored_text,
+            task_text,
+        ]
+    )
     task_tokens = token_set(task_text)
 
     named_deliverable_matches = _named_deliverable_from_matches(
-        _task_local_assignment_text(authored_text, task),
+        local_assignment_text,
         project.people,
     )
     if not named_deliverable_matches:
@@ -71,7 +78,6 @@ async def resolve_assignees(
     if named_deliverable_matches:
         return named_deliverable_matches
 
-    local_assignment_text = _task_local_assignment_text(authored_text, task)
     explicit_matches = _explicit_assignment_matches(local_assignment_text, project.people)
     if not explicit_matches:
         explicit_matches = _explicit_assignment_matches(task_text, project.people)
@@ -227,19 +233,19 @@ def _explicit_assignment_matches(
             modal_person_action_pattern = (
                 rf"\b(?:can|could|should|will)\s+{reference_pattern}\b\s+"
                 r"(?:confirm|update|review|prepare|send|coordinate|check|handle|"
-                r"reconcile|resolve|brief|walk|find|complete)\b"
+                r"reconcile|resolve|brief|walk|find|complete|document|summari[sz]e)\b"
             )
             named_person_modal_action_pattern = (
                 rf"\b{reference_pattern}\b\s+(?:should|will|must|is\s+to)\s+"
                 r"(?:perform|produce|send|update|confirm|schedule|review|complete|"
-                r"deliver|follow\s+up|provide|prepare|draft|create|revise|reconcile|"
+                r"deliver|document|follow\s+up|provide|prepare|draft|create|revise|reconcile|"
                 r"resolve|check|validate|verify|investigate|analy[sz]e|clean\s+up|"
                 r"coordinate|brief|upload|attach|share|route|submit|approve|close|fix|"
                 r"summari[sz]e)\b"
             )
             named_action_pattern = (
                 rf"\b{reference_pattern}\b(?:\s|,)*(?:can you|please|need you|"
-                r"update|review|prepare|send|coordinate)\b"
+                r"update|review|prepare|send|coordinate|document|summari[sz]e)\b"
             )
             direct_delegation_pattern = (
                 r"\b(?:have|ask|tell)\s+"
@@ -302,6 +308,10 @@ def _task_local_assignment_text(
     authored_text: str,
     task: ExtractedTaskCandidate,
 ) -> str:
+    grounded_evidence = _best_grounded_task_evidence(authored_text, task)
+    if grounded_evidence:
+        return grounded_evidence
+
     due_text = (task.due_text or "").strip()
     if not authored_text or not due_text:
         return ""
@@ -311,17 +321,52 @@ def _task_local_assignment_text(
         return ""
 
     boundaries = [0]
-    boundaries.extend(
-        match.end()
-        for match in re.finditer(
-            r"(?:\r?\n){2,}|(?<=[.!?])\s+(?=[A-ZI])",
-            authored_text,
-        )
-    )
+    for match in re.finditer(
+        r"(?:\r?\n){2,}|(?<=[.!?])\s+(?=[A-ZI])|"
+        r",\s+(?:and|also|while|then)\s+(?=[A-Z])",
+        authored_text,
+        re.IGNORECASE,
+    ):
+        boundaries.extend([match.start(), match.end()])
     boundaries.append(len(authored_text))
     start = max(boundary for boundary in boundaries if boundary <= anchor_start)
     end = min(boundary for boundary in boundaries if boundary > anchor_start)
     return authored_text[start:end].strip()
+
+
+def _best_grounded_task_evidence(
+    authored_text: str,
+    task: ExtractedTaskCandidate,
+) -> str:
+    if not authored_text or not task.evidence:
+        return ""
+
+    authored_lower = authored_text.lower()
+    task_tokens = token_set(" ".join([task.title, task.description]))
+    due_text = (task.due_text or "").strip().lower()
+    candidates: list[tuple[float, int, str]] = []
+
+    for evidence in task.evidence:
+        snippet = evidence.strip().strip("\"'“”‘’").strip()
+        if len(snippet) < 12:
+            continue
+        start = authored_lower.find(snippet.lower())
+        if start < 0:
+            continue
+
+        snippet_tokens = token_set(snippet)
+        overlap = (
+            len(task_tokens & snippet_tokens) / len(task_tokens)
+            if task_tokens
+            else 0.0
+        )
+        due_bonus = 1.0 if due_text and due_text in snippet.lower() else 0.0
+        grounded_text = authored_text[start : start + len(snippet)]
+        candidates.append((due_bonus + overlap, len(snippet), grounded_text))
+
+    if not candidates:
+        return ""
+    return max(candidates, key=lambda item: (item[0], item[1]))[2].strip()
 
 
 def _named_deliverable_from_matches(
