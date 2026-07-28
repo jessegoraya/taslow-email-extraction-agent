@@ -70,9 +70,12 @@ async def resolve_assignees(
     if named_deliverable_matches:
         return named_deliverable_matches
 
-    explicit_matches = _explicit_assignment_matches(authored_text, project.people)
+    local_assignment_text = _task_local_assignment_text(authored_text, task)
+    explicit_matches = _explicit_assignment_matches(local_assignment_text, project.people)
     if not explicit_matches:
         explicit_matches = _explicit_assignment_matches(task_text, project.people)
+    if not explicit_matches and not local_assignment_text:
+        explicit_matches = _explicit_assignment_matches(authored_text, project.people)
     if explicit_matches:
         if _explicit_matches_are_soft_direct(explicit_matches):
             owner_matches = _accountable_owner_matches(request, email_task_text, project)
@@ -174,6 +177,14 @@ def _explicit_assignment_matches(
                 r"(?:confirm|update|review|prepare|send|coordinate|check|handle|"
                 r"reconcile|resolve|brief|walk|find|complete)\b"
             )
+            named_person_modal_action_pattern = (
+                rf"\b{reference_pattern}\b\s+(?:should|will|must|is\s+to)\s+"
+                r"(?:perform|produce|send|update|confirm|schedule|review|complete|"
+                r"deliver|follow\s+up|provide|prepare|draft|create|revise|reconcile|"
+                r"resolve|check|validate|verify|investigate|analy[sz]e|clean\s+up|"
+                r"coordinate|brief|upload|attach|share|route|submit|approve|close|fix|"
+                r"summari[sz]e)\b"
+            )
             named_action_pattern = (
                 rf"\b{reference_pattern}\b(?:\s|,)*(?:can you|please|need you|"
                 r"update|review|prepare|send|coordinate)\b"
@@ -209,6 +220,9 @@ def _explicit_assignment_matches(
             if re.search(modal_person_action_pattern, normalized, re.IGNORECASE):
                 score = max(score, 0.94)
                 evidence.append("modal_named_actor_assignment")
+            if re.search(named_person_modal_action_pattern, normalized, re.IGNORECASE):
+                score = max(score, 0.95)
+                evidence.append("named_person_modal_assignment")
             if re.search(named_action_pattern, normalized, re.IGNORECASE):
                 score = max(score, 0.88)
                 evidence.append("named_person_action_language")

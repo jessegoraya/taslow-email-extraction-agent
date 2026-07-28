@@ -1,5 +1,11 @@
 # Email Extraction Agent Release Notes
 
+## v0.1.0-dev.13
+
+- Resolves explicit `Person should/will/must <action>` ownership against each extracted task.
+- Uses due-date-anchored task-local text before whole-message assignment evidence so one named
+  owner cannot leak into another task in the same email.
+
 ## v0.1.0-dev.12
 
 - Treats a literal full Project-name reference in the current email as the strongest deterministic
