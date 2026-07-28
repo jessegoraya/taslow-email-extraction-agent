@@ -26,6 +26,8 @@ async def normalize_due_date(
 ) -> tuple[datetime | None, float | None, list[str]]:
     base = request.sent_date_time
     due_text = task.due_text or _extract_due_text(" ".join([task.title, task.description]))
+    if not due_text and "forwarded_actionable_context" in task.evidence:
+        due_text = _extract_due_text(request.body_text)
     if not base or not due_text:
         return None, None, []
 
@@ -65,7 +67,7 @@ async def normalize_due_date(
 def _extract_due_text(text: str) -> str | None:
     match = re.search(
         r"\b(?:by|before|due)\s+([A-Z][a-z]+\s+\d{1,2}(?:,\s*\d{4})?|"
-        r"\d{1,2}/\d{1,2}(?:/\d{2,4})?|tomorrow|next\s+\w+|"
+        r"\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}(?:/\d{2,4})?|tomorrow|next\s+\w+|"
         r"monday|tuesday|wednesday|thursday|friday|saturday|sunday)",
         text,
         re.IGNORECASE,

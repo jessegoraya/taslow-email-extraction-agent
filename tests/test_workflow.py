@@ -185,6 +185,46 @@ def test_explicit_scope_reference_ignores_quoted_message(base_request, project):
     assert _match_explicit_scope_reference(base_request, project) is None
 
 
+def test_explicit_scope_reference_uses_protected_forwarded_context(
+    base_request,
+    project,
+):
+    scope_title = (
+        "Failure To Meet The Above Transition-Out Requirements May Result In "
+        "Withholding Of"
+    )
+    project.scopes = [
+        ProjectScope(
+            scopeId="scope-forwarded",
+            title=scope_title,
+            description="Transition-out payment requirements.",
+        ),
+        ProjectScope(
+            scopeId="scope-other",
+            title="Transition-Out Planning",
+            description="General transition planning.",
+        ),
+    ]
+    base_request.body_text = (
+        f"> Tessa should document the {scope_title} analysis by 2026-08-17.\n\n"
+        "The details above preserve the current conversation."
+    )
+    task = ExtractedTaskCandidate(
+        sourceTaskId="task-1",
+        title="Document the transition-out analysis",
+        description="Document the transition-out analysis.",
+        mentionedPeople=["Tessa"],
+        dueText=None,
+        confidence=0.93,
+        evidence=["forwarded_actionable_context"],
+    )
+
+    match = _match_explicit_scope_reference(base_request, project, task)
+
+    assert match is not None
+    assert match.scope_id == "scope-forwarded"
+
+
 def test_explicit_scope_reference_fails_closed_when_longest_match_is_ambiguous(
     base_request,
     project,

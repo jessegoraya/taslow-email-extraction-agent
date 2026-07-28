@@ -115,8 +115,123 @@ async def test_equal_confidence_prefers_stronger_project_participant_overlap():
 
     assert score is not None
     assert score.project.project_id == "participant-match"
-    assert score.result.confidence == 0.81
-    assert "project_selection_participant_tiebreak" in score.result.evidence
+    assert score.result.confidence < 0.80
+
+
+async def test_participants_alone_do_not_match_an_unknown_named_workstream():
+    request = EmailExtractionRequest(
+        tenantId="tenant-1",
+        mailbox="capri@tenant.example",
+        direction="received",
+        graphEventId="graph-no-project",
+        internetMessageId="<no-project@example.com>",
+        messageId="no-project",
+        subject="Blue Lantern Vendor Transition",
+        bodyText=(
+            "Capri should validate the Blue Lantern Vendor Transition update by "
+            "2026-08-06. Keep that workstream open until the update is checked."
+        ),
+        **{"from": {"email": "david@tenant.example", "name": "David"}},
+        to=[{"email": "capri@tenant.example", "name": "Capri"}],
+        cc=[],
+        bcc=[],
+        idempotencyKey="key-no-project",
+        correlationId="corr-no-project",
+    )
+    task = ExtractedTaskCandidate(
+        sourceTaskId="extracted-task-1",
+        title="Validate the Blue Lantern Vendor Transition update",
+        description="Validate the Blue Lantern Vendor Transition update by 2026-08-06.",
+        mentionedPeople=["Capri"],
+        dueText="2026-08-06",
+        confidence=0.94,
+        evidence=["explicit_task_language"],
+    )
+    unrelated = _project(
+        project_id="unrelated-project",
+        name="Radiology Staffing and Medical Support",
+        search_score=0.70,
+        search_rank=4,
+        search_margin=0.0,
+        people=[
+            AssociatedPerson(name="Capri", email="capri@tenant.example"),
+            AssociatedPerson(name="David", email="david@tenant.example"),
+        ],
+    )
+
+    score = await score_project_candidates(
+        request,
+        [task],
+        [unrelated],
+        thread_context=None,
+        threshold=0.80,
+    )
+
+    assert score is not None
+    assert score.result.confidence < 0.80
+    assert score.result.decision_reason == "weighted_evidence"
+
+
+async def test_exact_generic_scope_and_participants_can_match_project():
+    request = EmailExtractionRequest(
+        tenantId="tenant-1",
+        mailbox="sofia@tenant.example",
+        direction="received",
+        graphEventId="graph-generic-scope-route",
+        internetMessageId="<generic-scope-route@example.com>",
+        messageId="generic-scope-route",
+        subject="Contract Administration And Management review",
+        bodyText=(
+            "Sofia, please confirm the Contract Administration And Management "
+            "analysis by 2026-08-17."
+        ),
+        **{"from": {"email": "manager@tenant.example", "name": "Manager"}},
+        to=[{"email": "sofia@tenant.example", "name": "Sofia"}],
+        cc=[],
+        bcc=[],
+        idempotencyKey="key-generic-scope-route",
+        correlationId="corr-generic-scope-route",
+    )
+    task = ExtractedTaskCandidate(
+        sourceTaskId="extracted-task-1",
+        title="Confirm the Contract Administration And Management analysis",
+        description="Confirm the Contract Administration And Management analysis.",
+        mentionedPeople=["Sofia"],
+        dueText="2026-08-17",
+        confidence=0.94,
+        evidence=["explicit_task_language"],
+    )
+    expected = _project(
+        project_id="pest-control",
+        name="Pest Control Services",
+        search_score=0.71,
+        search_rank=3,
+        search_margin=0.0,
+        people=[
+            AssociatedPerson(name="Sofia", email="sofia@tenant.example"),
+            AssociatedPerson(name="Manager", email="manager@tenant.example"),
+        ],
+        scopes=[
+            ProjectScope(
+                scopeId="contract-admin",
+                title="Contract Administration And Management",
+                description="Contract administration requirements.",
+            )
+        ],
+    )
+
+    score = await score_project_candidates(
+        request,
+        [task],
+        [expected],
+        thread_context=None,
+        threshold=0.80,
+    )
+
+    assert score is not None
+    assert score.result.confidence >= 0.80
+    assert score.result.decision_reason == "explicit_scope_and_participant_evidence"
+    assert "explicit_scope_title_reference" in score.result.evidence
 
 
 async def test_equal_confidence_and_participants_preserve_search_order():
@@ -235,7 +350,8 @@ async def test_equal_primary_evidence_uses_weighted_project_evidence():
 
     assert score is not None
     assert score.project.project_id == "distribution"
-    assert "project_selection_weighted_evidence_tiebreak" in score.result.evidence
+    assert score.result.confidence < 0.80
+    assert score.result.decision_reason == "weak_external_project_anchor"
 
 
 async def test_subject_alias_rank_one_project_beats_weak_external_sender_candidate():

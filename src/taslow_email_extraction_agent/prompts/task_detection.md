@@ -8,6 +8,11 @@ Rules:
 - Evaluate the newest authored content first.
 - Use quoted or forwarded content only when the newest authored content explicitly delegates the
   forwarded request.
+- A quoted request may also be treated as current when the deterministic runtime marks it as a
+  `recipientGroundedQuotedActionRequest`: the quote must name a current transport recipient as the
+  actor, and the newest content must not say FYI, completed, cancelled, or no action needed.
+- For either bounded forwarding case, preserve the quoted Project, Scope, assignee, and due-date
+  evidence in the extracted task.
 - Do not invent facts that are not in the email.
 - Each task description must contain enough surrounding context to understand the request without opening the email.
 - A completed action, current-state summary, informational update, courtesy closing, conditional

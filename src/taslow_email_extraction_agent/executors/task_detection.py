@@ -272,6 +272,7 @@ class FoundryTaskExtractor:
         try:
             candidates, input_tokens, output_tokens = await self._extract_with_model(request)
             recovery_reason = _task_recovery_reason(request) if not candidates else None
+            _forwarded_context, forwarded_reason = _forwarded_action_context(request)
             recovery_attempted = recovery_reason is not None
             recovery_succeeded = False
             warning = None
@@ -315,6 +316,23 @@ class FoundryTaskExtractor:
                         "task_detection_recovery_failed:"
                         f"{type(recovery_error).__name__}"
                     )
+            if candidates and forwarded_reason:
+                candidates = [
+                    candidate.model_copy(
+                        update={
+                            "evidence": list(
+                                dict.fromkeys(
+                                    [
+                                        *candidate.evidence,
+                                        "forwarded_actionable_context",
+                                        forwarded_reason,
+                                    ]
+                                )
+                            )
+                        }
+                    )
+                    for candidate in candidates
+                ]
             self.last_run_info = TaskExtractionRunInfo(
                 provider=self._settings.agent_task_extractor_provider,
                 model_deployment=self._settings.azure_ai_model_deployment_name,
@@ -452,6 +470,9 @@ When forwardedDeliveryActionRequest is true, the transport sender forwarded a co
 request as the complete current message. Treat that delivery as a current handoff to the transport
 recipients. Use the forwarded request for task, Project, Scope, and due-date context, but do not
 assign work to the fictional external sender.
+When recipientGroundedQuotedActionRequest is true, a quoted or forwarded request explicitly names
+one of the current transport recipients as the actor. Treat that bounded request as current, carry
+its Project, Scope, and due-date details into the task, and assign only the named current recipient.
 Implicit business-risk language can still be a task even without "please" or "can you" wording.
 Create a task when the newest message clearly implies work is needed, such as:
 - a log, tracker, dashboard, access queue, or record has not been updated and should be corrected;
@@ -483,6 +504,9 @@ the recipient to handle the request below. The newest authored text controls cur
 When forwardedDeliveryActionRequest is true, the entire current delivery is a forwarded direct
 request. It may be reconsidered as a current handoff only because the deterministic guard verified
 concrete request language; status-only, completed, conditional, or FYI forwards remain non-tasks.
+When recipientGroundedQuotedActionRequest is true, reconsider only the quoted request that names a
+current transport recipient as the actor. Preserve its Project, Scope, and due date. Do not revive
+quoted work when the newest authored text says it is FYI, completed, cancelled, or needs no action.
 Return only JSON matching the schema. Do not invent Projects, Scopes, assignees, due dates, or
 facts not present in the email."""
 
@@ -491,20 +515,23 @@ def _request_prompt_payload(
     request: EmailExtractionRequest,
     recovery_reason: str | None = None,
 ) -> dict:
-    newest_body, quoted_context = split_newest_and_quoted_text(request.body_text)
-    explicit_handoff = has_forwarded_actionable_handoff(request.body_text)
-    forwarded_delivery_context = _forwarded_delivery_action_context(request)
-    handoff = explicit_handoff or bool(forwarded_delivery_context)
-    forwarded_context = quoted_context if explicit_handoff else forwarded_delivery_context
+    newest_body, _quoted_context = split_newest_and_quoted_text(request.body_text)
+    forwarded_context, forwarded_reason = _forwarded_action_context(request)
+    handoff = bool(forwarded_context)
+    forwarded_delivery = forwarded_reason == "forwarded_delivery_action_request"
+    recipient_grounded = forwarded_reason == "recipient_grounded_quoted_action_request"
     payload = {
         "subject": request.subject,
         "newestAuthoredText": newest_body,
         "forwardedContextText": forwarded_context if handoff else "",
         "forwardedActionableHandoff": handoff,
-        "forwardedDeliveryActionRequest": bool(forwarded_delivery_context),
+        "forwardedDeliveryActionRequest": forwarded_delivery,
+        "recipientGroundedQuotedActionRequest": recipient_grounded,
         "forwardedHandoffPolicy": (
             "If forwardedDeliveryActionRequest is true, the transport sender's current delivery "
             "is the handoff and the transport recipients are the current assignment context. "
+            "If recipientGroundedQuotedActionRequest is true, use only the quoted request that "
+            "explicitly names a current transport recipient as the actor. "
             "Otherwise, when forwardedActionableHandoff is true, extract the work item from the "
             "forwarded context but use the newest authored message to determine assignment intent."
         ),
@@ -522,16 +549,14 @@ def _request_prompt_payload(
 
 
 def _task_recovery_reason(request: EmailExtractionRequest) -> str | None:
-    if _forwarded_delivery_action_context(request):
-        return "forwarded_delivery_action_request"
+    _forwarded_context, forwarded_reason = _forwarded_action_context(request)
+    if forwarded_reason:
+        return forwarded_reason
 
     newest_body, _quoted_context = split_newest_and_quoted_text(request.body_text)
     authored_text = newest_body.strip() or request.subject.strip()
     if not authored_text:
         return None
-
-    if has_forwarded_actionable_handoff(request.body_text):
-        return "forwarded_actionable_handoff"
 
     sentences = [
         sentence.strip()
@@ -573,6 +598,88 @@ def _task_recovery_reason(request: EmailExtractionRequest) -> str | None:
     if COMPLETED_WORK_RE.search(authored_text) or STATUS_ONLY_RE.search(authored_text):
         return None
     return None
+
+
+def _forwarded_action_context(
+    request: EmailExtractionRequest,
+) -> tuple[str, str | None]:
+    newest_body, quoted_context = split_newest_and_quoted_text(request.body_text)
+    if quoted_context and has_forwarded_actionable_handoff(request.body_text):
+        return quoted_context, "forwarded_actionable_handoff"
+
+    forwarded_delivery_context = _forwarded_delivery_action_context(request)
+    if forwarded_delivery_context:
+        return forwarded_delivery_context, "forwarded_delivery_action_request"
+
+    recipient_grounded_context = _recipient_grounded_quoted_action_context(
+        request,
+        newest_body,
+        quoted_context,
+    )
+    if recipient_grounded_context:
+        return recipient_grounded_context, "recipient_grounded_quoted_action_request"
+    return "", None
+
+
+def _recipient_grounded_quoted_action_context(
+    request: EmailExtractionRequest,
+    newest_body: str,
+    quoted_context: str,
+) -> str:
+    body = request.body_text.strip()
+    has_forwarded_shape = bool(
+        quoted_context or FORWARDED_DELIVERY_WRAPPER_RE.search(body)
+    )
+    if not body or not has_forwarded_shape:
+        return ""
+    if (
+        NO_ACTION_RE.search(newest_body)
+        or STATUS_ONLY_RE.search(newest_body)
+        or (
+            COMPLETED_WORK_RE.search(newest_body)
+            and not ACTIONABLE_OUTCOME_RE.search(newest_body)
+        )
+    ):
+        return ""
+
+    action_context = quoted_context or body
+    if NO_ACTION_RE.search(action_context) or STATUS_ONLY_RE.search(action_context):
+        return ""
+    return (
+        action_context
+        if _names_current_recipient_as_actor(action_context, request)
+        else ""
+    )
+
+
+def _names_current_recipient_as_actor(
+    text: str,
+    request: EmailExtractionRequest,
+) -> bool:
+    for recipient in request.visible_recipients:
+        references = {
+            recipient.name.strip(),
+            recipient.email.strip(),
+        }
+        if recipient.name.strip():
+            references.add(recipient.name.split()[0])
+        for reference in (value for value in references if value):
+            escaped_reference = r"\s+".join(
+                re.escape(part) for part in reference.split()
+            )
+            if re.search(
+                rf"(?is)(?<!\w){escaped_reference}(?!\w)"
+                rf"\s+(?:should|must|needs?\s+to)\s+{ACTION_TOKEN_RE.pattern}",
+                text,
+            ):
+                return True
+            if re.search(
+                rf"(?is)(?:^|\n)\s*>?\s*{escaped_reference}\s*,"
+                rf".{{0,240}}?\bplease\s+{ACTION_TOKEN_RE.pattern}",
+                text,
+            ):
+                return True
+    return False
 
 
 def _forwarded_delivery_action_context(request: EmailExtractionRequest) -> str:
