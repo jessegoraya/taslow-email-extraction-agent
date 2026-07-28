@@ -1,5 +1,14 @@
 # Email Extraction Agent Release Notes
 
+## v0.1.0-dev.15
+
+- Grounds each task's assignee resolution in model evidence that is verified verbatim against the
+  newest authored email, preventing another task's named actor from leaking across task boundaries.
+- Preserves explicit deterministic ownership through assignee reranking and recognizes `document`
+  and `summarize` assignment language.
+- Leaves Project, Scope, task-count, due-date, downstream-write, and stable hosted routing behavior
+  unchanged until the protected regression and full 1,500-case evaluation gates pass.
+
 ## v0.1.0-dev.14
 
 - Replaces mailbox-handle Project names with canonical display names from the current email
