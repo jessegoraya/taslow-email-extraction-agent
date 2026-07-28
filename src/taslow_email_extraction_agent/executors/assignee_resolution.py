@@ -207,7 +207,7 @@ def _explicit_assignment_matches(
         score = 0.0
 
         for reference in _person_reference_variants(person):
-            reference_pattern = re.escape(reference)
+            reference_pattern = _person_reference_pattern(reference)
             direct_address_pattern = (
                 rf"^\s*{reference_pattern}\b\s*,"
                 r".{0,80}\b(?:can|could|would)\s+you\b|"
@@ -347,22 +347,24 @@ def _best_grounded_task_evidence(
     candidates: list[tuple[float, int, str]] = []
 
     for evidence in task.evidence:
-        snippet = evidence.strip().strip("\"'“”‘’").strip()
-        if len(snippet) < 12:
-            continue
-        start = authored_lower.find(snippet.lower())
-        if start < 0:
-            continue
+        evidence_text = evidence.strip().strip("\"'“”‘’").strip()
+        snippets = list(dict.fromkeys([evidence_text, evidence_text.rstrip(".!?")]))
+        for snippet in snippets:
+            if len(snippet) < 12:
+                continue
+            start = authored_lower.find(snippet.lower())
+            if start < 0:
+                continue
 
-        snippet_tokens = token_set(snippet)
-        overlap = (
-            len(task_tokens & snippet_tokens) / len(task_tokens)
-            if task_tokens
-            else 0.0
-        )
-        due_bonus = 1.0 if due_text and due_text in snippet.lower() else 0.0
-        grounded_text = authored_text[start : start + len(snippet)]
-        candidates.append((due_bonus + overlap, len(snippet), grounded_text))
+            snippet_tokens = token_set(snippet)
+            overlap = (
+                len(task_tokens & snippet_tokens) / len(task_tokens)
+                if task_tokens
+                else 0.0
+            )
+            due_bonus = 1.0 if due_text and due_text in snippet.lower() else 0.0
+            grounded_text = authored_text[start : start + len(snippet)]
+            candidates.append((due_bonus + overlap, len(snippet), grounded_text))
 
     if not candidates:
         return ""
@@ -393,7 +395,7 @@ def _named_deliverable_from_matches(
         if not person.email:
             continue
         for reference in _person_reference_variants(person):
-            reference_pattern = re.escape(reference)
+            reference_pattern = _person_reference_pattern(reference)
             patterns = [
                 rf"\b(?:{request_prefix})\b.{{0,140}}\b{deliverable}\b"
                 rf".{{0,120}}\bfrom\s+@?{reference_pattern}\b",
@@ -443,6 +445,12 @@ def _person_reference_variants(person: AssociatedPerson) -> set[str]:
             if len(part) > 2:
                 variants.add(part)
     return {variant for variant in variants if len(variant) > 2}
+
+
+def _person_reference_pattern(reference: str) -> str:
+    return r"\s+".join(
+        re.escape(part) for part in re.split(r"\s+", reference.strip()) if part
+    )
 
 
 def _accountable_owner_matches(
@@ -782,7 +790,7 @@ def _has_subject_matter_owner_signal(text: str, person: AssociatedPerson) -> boo
 
 def _has_beneficiary_or_owner_signal(text: str, person: AssociatedPerson) -> bool:
     for reference in _person_reference_variants(person):
-        reference_pattern = re.escape(reference)
+        reference_pattern = _person_reference_pattern(reference)
         patterns = [
             rf"\bhelp\s+{reference_pattern}\b",
             rf"\bmake\s+sure\s+{reference_pattern}\b",
@@ -803,7 +811,7 @@ def _has_beneficiary_or_owner_signal(text: str, person: AssociatedPerson) -> boo
 
 def _has_named_request_actor_signal(text: str, person: AssociatedPerson) -> bool:
     for reference in _person_reference_variants(person):
-        reference_pattern = re.escape(reference)
+        reference_pattern = _person_reference_pattern(reference)
         immediate_pattern = (
             rf"\b(?:can|could|should|will)\s+{reference_pattern}\s+"
             r"(?:confirm|check|review|update|send|handle|coordinate|reconcile|resolve|"
@@ -830,7 +838,7 @@ def _is_context_reviewer_or_delivery_target_only(
     include_coordination_targets: bool = True,
 ) -> bool:
     for reference in _person_reference_variants(person):
-        reference_pattern = re.escape(reference)
+        reference_pattern = _person_reference_pattern(reference)
         target_patterns = [
             rf"\b(?:send|get|provide|share|forward|route|deliver|resend)\b.{0, 100}"
             rf"\b(?:to|for)\s+{reference_pattern}\b",

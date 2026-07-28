@@ -697,6 +697,84 @@ async def test_grounded_evidence_prevents_later_named_owner_leaking_to_first_cla
     assert "named_person_modal_assignment" in second_matches[0][2]
 
 
+async def test_grounded_evidence_allows_terminal_punctuation_to_continue_source_clause():
+    request = _request(
+        body=(
+            "Carlos, please update the property analysis by 2026-08-12. "
+            "Emma Thompson should reconcile the property follow-up by 2026-08-13, "
+            "so both items stay active."
+        ),
+        to=[{"email": "carlos@tenant.com", "name": "Carlos Mendoza"}],
+        cc=[],
+        direction="received",
+        from_email="emma@tenant.com",
+        from_name="Emma Thompson",
+    )
+    project = ProjectContext(
+        projectId="project-1",
+        projectName="Capacity Services Communications",
+        associatedPeople=[
+            AssociatedPerson(name="Carlos Mendoza", email="carlos@tenant.com"),
+            AssociatedPerson(name="Emma Thompson", email="emma@tenant.com"),
+        ],
+        associatedManagers=[],
+        scopes=[],
+    )
+    task = _task(
+        "Reconcile the property follow-up.",
+        due_text="2026-08-13",
+        evidence=[
+            '"Emma Thompson should reconcile the property follow-up '
+            'by 2026-08-13."'
+        ],
+    )
+
+    matches = await resolve_assignees(request, task, project)
+
+    assert [match[0].email for match in matches] == ["emma@tenant.com"]
+    assert "named_person_modal_assignment" in matches[0][2]
+
+
+async def test_named_owner_matching_normalizes_directory_whitespace():
+    request = _request(
+        body=(
+            "Bradford,\n\n"
+            "Please analyze the legal advisory analysis by 2026-08-13.\n\n"
+            "Gabriel Silva should summarize the legal advisory follow-up by "
+            "2026-08-14."
+        ),
+        to=[{"email": "bradford@tenant.com", "name": "Bradford Ebright"}],
+        cc=[],
+        direction="received",
+        from_email="external@example.com",
+        from_name="External Requester",
+    )
+    project = ProjectContext(
+        projectId="project-1",
+        projectName="Fair Lending Legal Advisory",
+        associatedPeople=[
+            AssociatedPerson(name="Bradford Ebright", email="bradford@tenant.com"),
+        ],
+        associatedManagers=[
+            AssociatedPerson(name="Gabriel  Silva", email="gabriel@tenant.com"),
+        ],
+        scopes=[],
+    )
+    task = _task(
+        "Summarize the legal advisory follow-up.",
+        due_text="2026-08-14",
+        evidence=[
+            '"Gabriel Silva should summarize the legal advisory follow-up '
+            'by 2026-08-14."'
+        ],
+    )
+
+    matches = await resolve_assignees(request, task, project)
+
+    assert [match[0].email for match in matches] == ["gabriel@tenant.com"]
+    assert "named_person_modal_assignment" in matches[0][2]
+
+
 def _project() -> ProjectContext:
     return ProjectContext(
         projectId="project-1",
