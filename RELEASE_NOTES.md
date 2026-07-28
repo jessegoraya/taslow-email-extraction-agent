@@ -1,5 +1,17 @@
 # Email Extraction Agent Release Notes
 
+## v0.1.0-dev.18
+
+- Recognizes a current quoted delivery when a transport recipient appears as a quoted recipient
+  header immediately before a concrete `please <action>` request.
+- Preserves explicit recipient assignments when active-work language appears alongside a contrast
+  such as "rather than a status update"; explicit FYI, completed, and no-action wording continues
+  to suppress recovery.
+- Prefers an exact Scope title in protected forwarded content when the subject only names the
+  selected Project's generic same-name Scope.
+- Requires all 232 protected S4 and Story 6 remediation cases to pass before the full 1,500-case
+  BloomSky Test evaluation may begin.
+
 ## v0.1.0-dev.17
 
 - Rejects participant-only and weak-margin Project matches when an actionable email names a

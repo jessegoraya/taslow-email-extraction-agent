@@ -126,12 +126,56 @@ def test_recovery_guard_detects_recipient_grounded_quoted_request(base_request):
     )
 
 
+def test_recovery_guard_detects_quoted_recipient_header_then_request(base_request):
+    base_request.body_text = (
+        "> Tessa\n"
+        ">\n"
+        "> Please prepare the Electrical Scope analysis by 2026-08-17.\n\n"
+        "The details above preserve the current conversation."
+    )
+
+    assert (
+        _task_recovery_reason(base_request)
+        == "recipient_grounded_quoted_action_request"
+    )
+
+
+def test_recovery_guard_detects_active_assignment_despite_status_contrast(
+    base_request,
+):
+    base_request.body_text = (
+        "From: External Program Lead\n"
+        "Sent: 2026-08-05 14:57 UTC\n\n"
+        "Tessa should draft the Electrical Scope analysis by 2026-08-17. "
+        "The item remains open and should be treated as an active drafting request. "
+        "Keep it framed as in-progress work rather than a status update."
+    )
+
+    assert (
+        _task_recovery_reason(base_request)
+        == "recipient_grounded_quoted_action_request"
+    )
+
+
 def test_recovery_guard_rejects_recipient_grounded_quote_with_fyi_override(
     base_request,
 ):
     base_request.body_text = (
         "FYI only. No action is needed.\n\n"
         "> Tessa should validate the Electrical Scope analysis by 2026-08-17."
+    )
+
+    assert _task_recovery_reason(base_request) is None
+
+
+def test_recovery_guard_rejects_recipient_header_request_with_no_action_override(
+    base_request,
+):
+    base_request.body_text = (
+        "FYI only. No action is needed.\n\n"
+        "> Tessa\n"
+        ">\n"
+        "> Please prepare the Electrical Scope analysis by 2026-08-17."
     )
 
     assert _task_recovery_reason(base_request) is None

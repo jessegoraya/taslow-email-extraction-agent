@@ -127,6 +127,14 @@ STATUS_ONLY_RE = re.compile(
     re.IGNORECASE,
 )
 
+ACTIVE_ASSIGNMENT_RE = re.compile(
+    r"\b(?:remains?\s+open|still\s+(?:needed|required|active|outstanding)|"
+    r"active\s+(?:assignment|request|work\s+item)|in[-\s]?progress|"
+    r"assignment\s+(?:remains|stays)\s+(?:active|visible)|"
+    r"should\s+be\s+treated\s+as\s+an?\s+active)\b",
+    re.IGNORECASE,
+)
+
 NO_ACTION_RE = re.compile(
     r"\b(?:no|nothing)\s+(?:further\s+|additional\s+|new\s+)?"
     r"(?:action|follow-up|follow\s+up|next\s+steps?|work|response)\s+"
@@ -632,24 +640,24 @@ def _recipient_grounded_quoted_action_context(
     )
     if not body or not has_forwarded_shape:
         return ""
-    if (
-        NO_ACTION_RE.search(newest_body)
-        or STATUS_ONLY_RE.search(newest_body)
-        or (
-            COMPLETED_WORK_RE.search(newest_body)
-            and not ACTIONABLE_OUTCOME_RE.search(newest_body)
-        )
-    ):
-        return ""
 
     action_context = quoted_context or body
-    if NO_ACTION_RE.search(action_context) or STATUS_ONLY_RE.search(action_context):
+    recipient_is_actor = _names_current_recipient_as_actor(action_context, request)
+    if not recipient_is_actor:
         return ""
-    return (
-        action_context
-        if _names_current_recipient_as_actor(action_context, request)
-        else ""
+    if NO_ACTION_RE.search(newest_body) or NO_ACTION_RE.search(action_context):
+        return ""
+    status_only_language = bool(
+        STATUS_ONLY_RE.search(newest_body) or STATUS_ONLY_RE.search(action_context)
     )
+    if status_only_language and not ACTIVE_ASSIGNMENT_RE.search(action_context):
+        return ""
+    if (
+        COMPLETED_WORK_RE.search(newest_body)
+        and not ACTIONABLE_OUTCOME_RE.search(newest_body)
+    ):
+        return ""
+    return action_context
 
 
 def _names_current_recipient_as_actor(
@@ -675,6 +683,12 @@ def _names_current_recipient_as_actor(
                 return True
             if re.search(
                 rf"(?is)(?:^|\n)\s*>?\s*{escaped_reference}\s*,"
+                rf".{{0,240}}?\bplease\s+{ACTION_TOKEN_RE.pattern}",
+                text,
+            ):
+                return True
+            if re.search(
+                rf"(?ims)(?:^|\n)\s*>?\s*{escaped_reference}\s*,?\s*$"
                 rf".{{0,240}}?\bplease\s+{ACTION_TOKEN_RE.pattern}",
                 text,
             ):

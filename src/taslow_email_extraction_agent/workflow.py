@@ -529,16 +529,29 @@ def _match_explicit_scope_reference(
         if task and "forwarded_actionable_context" in task.evidence
         else None
     )
+    context_match = body_match
+    if forwarded_match and (
+        context_match is None or _scope_is_project_name(context_match, project)
+    ):
+        context_match = forwarded_match
 
     if (
         subject_match
-        and body_match
-        and subject_match.scope_id != body_match.scope_id
-        and _normalize_scope_reference_text(subject_match.title)
-        == _normalize_scope_reference_text(project.project_name)
+        and context_match
+        and subject_match.scope_id != context_match.scope_id
+        and _scope_is_project_name(subject_match, project)
     ):
-        return body_match
-    return subject_match or body_match or forwarded_match
+        return context_match
+    return subject_match or context_match
+
+
+def _scope_is_project_name(
+    scope: ProjectScope,
+    project: ProjectContext,
+) -> bool:
+    return _normalize_scope_reference_text(scope.title) == _normalize_scope_reference_text(
+        project.project_name
+    )
 
 
 def _match_scope_title_in_text(
