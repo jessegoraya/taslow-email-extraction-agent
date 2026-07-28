@@ -498,6 +498,66 @@ async def test_named_deliverable_from_person_is_local_to_matching_due_date():
     assert "named_deliverable_source_assignment" in second_matches[0][2]
 
 
+async def test_named_modal_owners_stay_local_to_each_multi_task():
+    request = _request(
+        body=(
+            "David Vance should summarize the operations analysis by 2026-08-16. "
+            "Jesse should validate the operations follow-up by 2026-08-17. "
+            "Both items remain open."
+        ),
+        to=[{"email": "david@tenant.com", "name": "David"}],
+        cc=[],
+        direction="received",
+        from_email="jesse@tenant.com",
+    )
+    first_task = _task(
+        "Summarize the operations analysis.",
+        due_text="2026-08-16",
+    )
+    second_task = _task(
+        "Validate the operations follow-up.",
+        due_text="2026-08-17",
+    )
+
+    first_matches = await resolve_assignees(request, first_task, _project())
+    second_matches = await resolve_assignees(request, second_task, _project())
+
+    assert [match[0].email for match in first_matches] == ["david@tenant.com"]
+    assert [match[0].email for match in second_matches] == ["jesse@tenant.com"]
+    assert "named_person_modal_assignment" in first_matches[0][2]
+    assert "named_person_modal_assignment" in second_matches[0][2]
+
+
+async def test_named_second_owner_does_not_leak_into_direct_recipient_task():
+    request = _request(
+        body=(
+            "David,\n\n"
+            "Please analyze the operations section by 2026-08-13. "
+            "Jesse should summarize the operations follow-up by 2026-08-14."
+        ),
+        to=[{"email": "david@tenant.com", "name": "David"}],
+        cc=[],
+        direction="received",
+        from_email="jason@tenant.com",
+    )
+    first_task = _task(
+        "Analyze the operations section.",
+        due_text="2026-08-13",
+    )
+    second_task = _task(
+        "Summarize the operations follow-up.",
+        due_text="2026-08-14",
+    )
+
+    first_matches = await resolve_assignees(request, first_task, _project())
+    second_matches = await resolve_assignees(request, second_task, _project())
+
+    assert [match[0].email for match in first_matches] == ["david@tenant.com"]
+    assert [match[0].email for match in second_matches] == ["jesse@tenant.com"]
+    assert "single_to_requested_outcome_assignment" in first_matches[0][2]
+    assert "named_person_modal_assignment" in second_matches[0][2]
+
+
 def _project() -> ProjectContext:
     return ProjectContext(
         projectId="project-1",
