@@ -558,6 +558,56 @@ async def test_named_second_owner_does_not_leak_into_direct_recipient_task():
     assert "named_person_modal_assignment" in second_matches[0][2]
 
 
+async def test_sender_display_name_enriches_mailbox_handle_project_person():
+    request = _request(
+        body=(
+            "Niklas,\n\n"
+            "Please update the transition-out analysis by 2026-08-12. "
+            "In parallel, Bradford Ebright should reconcile the transition-out "
+            "follow-up by 2026-08-13."
+        ),
+        to=[
+            {
+                "email": "niklasnuxoll@bloomsky.onmicrosoft.com",
+                "name": "Niklas Nuxoll",
+            }
+        ],
+        cc=[],
+        direction="received",
+        from_email="bebright@bloomsky.onmicrosoft.com",
+        from_name="Bradford Ebright",
+    )
+    project = ProjectContext(
+        projectId="project-1",
+        projectName="Fair Lending",
+        associatedPeople=[
+            AssociatedPerson(
+                name="niklasnuxoll",
+                email="niklasnuxoll@bloomsky.onmicrosoft.com",
+            ),
+            AssociatedPerson(
+                name="bebright",
+                email="bebright@bloomsky.onmicrosoft.com",
+            ),
+        ],
+        associatedManagers=[],
+        scopes=[],
+    )
+    first_task = _task("Update the transition-out analysis.", due_text="2026-08-12")
+    second_task = _task(
+        "Reconcile the transition-out follow-up.",
+        due_text="2026-08-13",
+    )
+
+    first_matches = await resolve_assignees(request, first_task, project)
+    second_matches = await resolve_assignees(request, second_task, project)
+
+    assert [match[0].email for match in first_matches] == ["niklasnuxoll@bloomsky.onmicrosoft.com"]
+    assert [match[0].email for match in second_matches] == ["bebright@bloomsky.onmicrosoft.com"]
+    assert second_matches[0][0].name == "Bradford Ebright"
+    assert "named_person_modal_assignment" in second_matches[0][2]
+
+
 def _project() -> ProjectContext:
     return ProjectContext(
         projectId="project-1",
@@ -658,6 +708,7 @@ def _request(
     cc: list[dict[str, str]],
     direction: str = "received",
     from_email: str = "external@example.com",
+    from_name: str = "External",
 ) -> EmailExtractionRequest:
     return EmailExtractionRequest(
         tenantId="tenant-1",
@@ -668,7 +719,7 @@ def _request(
         messageId="msg-1",
         subject="Lake Nona - implicit task",
         bodyText=body,
-        **{"from": {"email": from_email, "name": "External"}},
+        **{"from": {"email": from_email, "name": from_name}},
         to=to,
         cc=cc,
         bcc=[],

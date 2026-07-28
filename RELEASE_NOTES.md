@@ -1,5 +1,14 @@
 # Email Extraction Agent Release Notes
 
+## v0.1.0-dev.14
+
+- Replaces mailbox-handle Project names with canonical display names from the current email
+  participants when the Project context has not yet been enriched.
+- Prefers a distinct explicit Scope in the authored body when the subject only repeats a
+  Project-named Scope, preventing Project labels from overriding the requested work area.
+- Keeps stable hosted routing unchanged until the protected multi-task regression and full
+  1,500-case evaluation gates pass.
+
 ## v0.1.0-dev.13
 
 - Resolves explicit `Person should/will/must <action>` ownership against each extracted task.
