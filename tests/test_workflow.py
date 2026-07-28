@@ -300,6 +300,50 @@ def test_explicit_scope_reference_prefers_body_when_subject_scope_is_project_nam
     assert match.scope_id == "scope-transition"
 
 
+def test_explicit_scope_reference_prefers_protected_forwarded_scope_over_project_name(
+    base_request,
+    project,
+):
+    project.project_name = "Fair Lending and Fair Housing Legal Advisory Services"
+    project.scopes = [
+        ProjectScope(
+            scopeId="scope-project-name",
+            title="Fair Lending And Fair Housing Legal Advisory Services",
+            description="General project introduction.",
+        ),
+        ProjectScope(
+            scopeId="scope-transition",
+            title=(
+                "Failure To Meet The Above Transition-Out Requirements May Result In Withholding Of"
+            ),
+            description="Transition-out payment requirements.",
+        ),
+    ]
+    base_request.subject = (
+        "Fwd: Fair Lending and Fair Housing Legal Advisory Services"
+    )
+    base_request.body_text = (
+        "From: External Program Lead\n"
+        "Subject: Fair Lending and Fair Housing Legal Advisory Services\n\n"
+        "Tessa should document the Failure To Meet The Above Transition-Out "
+        "Requirements May Result In Withholding Of analysis by 2026-08-17."
+    )
+    task = ExtractedTaskCandidate(
+        sourceTaskId="task-1",
+        title="Document the transition-out analysis",
+        description="Document the transition-out analysis.",
+        mentionedPeople=["Tessa"],
+        dueText=None,
+        confidence=0.93,
+        evidence=["forwarded_actionable_context"],
+    )
+
+    match = _match_explicit_scope_reference(base_request, project, task)
+
+    assert match is not None
+    assert match.scope_id == "scope-transition"
+
+
 async def test_direct_assignment_language_overrides_single_recipient(base_request, services):
     base_request.body_text = "Jesse, have Tessa update the electrical scope by next Friday at 5."
     base_request.to = [Participant(email="jesse@tenant.com", name="Jesse")]
