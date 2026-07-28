@@ -1,5 +1,14 @@
 # Email Extraction Agent Release Notes
 
+## v0.1.0-dev.16
+
+- Grounds task evidence when a quoted task ends with sentence punctuation but the authored email
+  continues the same clause with a comma.
+- Matches canonical Project-person names across harmless directory whitespace differences, while
+  keeping assignees constrained to people associated with the selected Project.
+- Leaves Project, Scope, task-count, due-date, downstream-write, and stable hosted routing behavior
+  unchanged pending the protected regression and full 1,500-case evaluation gates.
+
 ## v0.1.0-dev.15
 
 - Grounds each task's assignee resolution in model evidence that is verified verbatim against the
