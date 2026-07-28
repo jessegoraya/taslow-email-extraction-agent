@@ -23,11 +23,19 @@ from taslow_email_extraction_agent.text_utils import (
 AssigneeChoice = tuple[AssociatedPerson, float, list[str]]
 ScopeChoice = tuple[ProjectScope | None, float, list[str]]
 STRONG_DETERMINISTIC_ASSIGNEE_EVIDENCE = {
+    "direct_address_assignment",
+    "delegated_assignment_language",
+    "need_named_person_to_act",
+    "named_owner_drive_assignment",
+    "modal_named_actor_assignment",
+    "named_person_modal_assignment",
     "subject_matter_owner_signal",
     "requested_actor_assignment_language",
     "named_request_actor_signal",
     "named_deliverable_source_assignment",
     "beneficiary_or_owner_signal",
+    "same_block_generic_request_at_mention",
+    "sender_self_ownership_signal",
 }
 HIGH_DETERMINISTIC_SCOPE_CONFIDENCE = 0.86
 LOW_SCOPE_CONFIDENCE_FOR_RERANK = 0.78

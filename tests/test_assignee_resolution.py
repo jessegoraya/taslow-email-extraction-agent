@@ -608,6 +608,95 @@ async def test_sender_display_name_enriches_mailbox_handle_project_person():
     assert "named_person_modal_assignment" in second_matches[0][2]
 
 
+async def test_grounded_evidence_keeps_named_document_owner_local_to_second_task():
+    request = _request(
+        body=(
+            "Chinedu Okafor should confirm the C-14 Deliverable analysis by "
+            "2026-08-23 for NTSB Apparel BPA Support. Jake Ebright should "
+            "document the C-14 Deliverable follow-up by 2026-08-06. "
+            "Please keep both as active, unresolved items."
+        ),
+        to=[{"email": "cokafor@tenant.com", "name": "Chinedu Okafor"}],
+        cc=[],
+        direction="received",
+        from_email="jebright@tenant.com",
+        from_name="Jake Ebright",
+    )
+    project = ProjectContext(
+        projectId="project-1",
+        projectName="NTSB Apparel BPA Support",
+        associatedPeople=[
+            AssociatedPerson(name="Chinedu Okafor", email="cokafor@tenant.com"),
+            AssociatedPerson(name="Jake Ebright", email="jebright@tenant.com"),
+        ],
+        associatedManagers=[],
+        scopes=[],
+    )
+    task = _task(
+        "Document the C-14 Deliverable follow-up.",
+        due_text="2026-08-06",
+        evidence=[
+            '"Jake Ebright should document the C-14 Deliverable follow-up '
+            'by 2026-08-06."'
+        ],
+    )
+
+    matches = await resolve_assignees(request, task, project)
+
+    assert [match[0].email for match in matches] == ["jebright@tenant.com"]
+    assert "named_person_modal_assignment" in matches[0][2]
+
+
+async def test_grounded_evidence_prevents_later_named_owner_leaking_to_first_clause():
+    request = _request(
+        body=(
+            "Alex,\n\n"
+            "Please prepare the force management analysis by 2026-08-06, "
+            "and Chinedu Okafor should review the force management follow-up "
+            "by 2026-08-07."
+        ),
+        to=[{"email": "aebright@tenant.com", "name": "Alex Ebright"}],
+        cc=[],
+        direction="received",
+        from_email="external@example.com",
+        from_name="External Requester",
+    )
+    project = ProjectContext(
+        projectId="project-1",
+        projectName="Army Force Management Tech Support",
+        associatedPeople=[
+            AssociatedPerson(name="Chinedu Okafor", email="cokafor@tenant.com"),
+        ],
+        associatedManagers=[
+            AssociatedPerson(name="Alex Ebright", email="aebright@tenant.com"),
+        ],
+        scopes=[],
+    )
+    first_task = _task(
+        "Prepare the force management analysis.",
+        due_text="2026-08-06",
+        evidence=[
+            '"Please prepare the force management analysis by 2026-08-06"'
+        ],
+    )
+    second_task = _task(
+        "Review the force management follow-up.",
+        due_text="2026-08-07",
+        evidence=[
+            '"Chinedu Okafor should review the force management follow-up '
+            'by 2026-08-07"'
+        ],
+    )
+
+    first_matches = await resolve_assignees(request, first_task, project)
+    second_matches = await resolve_assignees(request, second_task, project)
+
+    assert [match[0].email for match in first_matches] == ["aebright@tenant.com"]
+    assert [match[0].email for match in second_matches] == ["cokafor@tenant.com"]
+    assert "single_to_requested_outcome_assignment" in first_matches[0][2]
+    assert "named_person_modal_assignment" in second_matches[0][2]
+
+
 def _project() -> ProjectContext:
     return ProjectContext(
         projectId="project-1",
@@ -731,6 +820,7 @@ def _request(
 def _task(
     description: str,
     due_text: str | None = None,
+    evidence: list[str] | None = None,
 ) -> ExtractedTaskCandidate:
     return ExtractedTaskCandidate(
         sourceTaskId="task-1",
@@ -739,5 +829,5 @@ def _task(
         mentionedPeople=[],
         dueText=due_text,
         confidence=0.9,
-        evidence=["implicit_task_language"],
+        evidence=evidence or ["implicit_task_language"],
     )
