@@ -516,11 +516,18 @@ def _match_explicit_scope_reference(
     project: ProjectContext,
 ) -> ProjectScope | None:
     subject_match = _match_scope_title_in_text(request.subject, project.scopes)
-    if subject_match:
-        return subject_match
-
     newest_body, _quoted_context = split_newest_and_quoted_text(request.body_text)
-    return _match_scope_title_in_text(newest_body, project.scopes)
+    body_match = _match_scope_title_in_text(newest_body, project.scopes)
+
+    if (
+        subject_match
+        and body_match
+        and subject_match.scope_id != body_match.scope_id
+        and _normalize_scope_reference_text(subject_match.title)
+        == _normalize_scope_reference_text(project.project_name)
+    ):
+        return body_match
+    return subject_match or body_match
 
 
 def _match_scope_title_in_text(

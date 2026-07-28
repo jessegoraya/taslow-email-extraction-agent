@@ -51,6 +51,7 @@ async def resolve_assignees(
     task: ExtractedTaskCandidate,
     project: ProjectContext,
 ) -> list[tuple[AssociatedPerson, float, list[str]]]:
+    project = _with_request_participant_display_names(request, project)
     visible_recipients = [p for p in request.visible_recipients if p.email]
     project_people_by_email = {person.email: person for person in project.people if person.email}
     task_text = " ".join([task.title, task.description, *task.mentioned_people])
@@ -127,6 +128,57 @@ async def resolve_assignees(
         return [match for match in matches if match[1] >= max(0.75, top_score - 0.05)]
 
     return []
+
+
+def _with_request_participant_display_names(
+    request: EmailExtractionRequest,
+    project: ProjectContext,
+) -> ProjectContext:
+    display_names = {
+        participant.email: participant.name.strip()
+        for participant in [
+            request.from_participant,
+            *request.to,
+            *request.cc,
+            *request.bcc,
+        ]
+        if participant and participant.email and participant.name.strip()
+    }
+    if not display_names:
+        return project
+
+    def enrich(person: AssociatedPerson) -> AssociatedPerson:
+        display_name = display_names.get(person.email)
+        if not display_name or not _is_mailbox_handle_name(person.name, person.email):
+            return person
+        aliases = [item.strip() for item in person.aliases.split(",") if item.strip()]
+        if person.name.strip() and person.name.strip().lower() not in {
+            item.lower() for item in aliases
+        }:
+            aliases.append(person.name.strip())
+        return person.model_copy(
+            update={
+                "name": display_name,
+                "aliases": ",".join(aliases),
+            }
+        )
+
+    return project.model_copy(
+        update={
+            "associated_people": [enrich(person) for person in project.associated_people],
+            "associated_managers": [enrich(person) for person in project.associated_managers],
+        }
+    )
+
+
+def _is_mailbox_handle_name(name: str, email: str) -> bool:
+    normalized_name = re.sub(r"[^a-z0-9]+", "", (name or "").lower())
+    normalized_handle = re.sub(
+        r"[^a-z0-9]+",
+        "",
+        (email or "").split("@", 1)[0].lower(),
+    )
+    return not normalized_name or normalized_name == normalized_handle
 
 
 def _explicit_assignment_matches(

@@ -227,6 +227,39 @@ def test_explicit_scope_reference_prefers_subject_over_longer_body_context(
     assert match.scope_id == "scope-requested"
 
 
+def test_explicit_scope_reference_prefers_body_when_subject_scope_is_project_name(
+    base_request,
+    project,
+):
+    project.project_name = "Fair Lending and Fair Housing Legal Advisory Services"
+    project.scopes = [
+        ProjectScope(
+            scopeId="scope-project-name",
+            title="Fair Lending And Fair Housing Legal Advisory Services",
+            description="General project introduction.",
+        ),
+        ProjectScope(
+            scopeId="scope-transition",
+            title=(
+                "Failure To Meet The Above Transition-Out Requirements May Result In Withholding Of"
+            ),
+            description="Transition-out payment requirements.",
+        ),
+    ]
+    base_request.subject = (
+        "Fair Lending and Fair Housing Legal Advisory Services - transition-out items"
+    )
+    base_request.body_text = (
+        "Please update the Failure To Meet The Above Transition-Out Requirements "
+        "May Result In Withholding Of analysis by 2026-08-12."
+    )
+
+    match = _match_explicit_scope_reference(base_request, project)
+
+    assert match is not None
+    assert match.scope_id == "scope-transition"
+
+
 async def test_direct_assignment_language_overrides_single_recipient(base_request, services):
     base_request.body_text = "Jesse, have Tessa update the electrical scope by next Friday at 5."
     base_request.to = [Participant(email="jesse@tenant.com", name="Jesse")]
