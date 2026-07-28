@@ -742,6 +742,142 @@ async def test_unique_scope_title_reference_overrides_ambiguous_participant_sear
     assert "explicit_unique_scope_title_reference" in score.result.evidence
 
 
+async def test_explicit_project_name_overrides_incidental_generic_scope_heading():
+    request = EmailExtractionRequest(
+        tenantId="tenant-1",
+        mailbox="david@tenant.example",
+        direction="received",
+        graphEventId="graph-explicit-project-name",
+        internetMessageId="<explicit-project-name@example.com>",
+        messageId="explicit-project-name",
+        subject="Gym Membership Services follow-up",
+        bodyText=(
+            "David, please confirm the operational service delivery analysis for "
+            "Gym Membership Services before Friday."
+        ),
+        **{"from": {"email": "lead@external.example", "name": "External Lead"}},
+        to=[{"email": "david@tenant.example", "name": "David"}],
+        cc=[],
+        bcc=[],
+        idempotencyKey="key-explicit-project-name",
+        correlationId="corr-explicit-project-name",
+    )
+    task = ExtractedTaskCandidate(
+        sourceTaskId="extracted-task-1",
+        title="Confirm the operational service delivery analysis",
+        description="Confirm the operational service delivery analysis before Friday.",
+        mentionedPeople=["David"],
+        dueText="before Friday",
+        confidence=0.92,
+        evidence=["explicit_task_language"],
+    )
+    wrong_search_result = _project(
+        project_id="wrong-project",
+        name="Data Analysis Requirements",
+        search_score=0.80,
+        search_rank=1,
+        search_margin=0.08,
+        people=[AssociatedPerson(name="David", email="david@tenant.example")],
+        scopes=[
+            ProjectScope(
+                scopeId="wrong-scope",
+                title="Operational Service Delivery",
+                description="General service delivery.",
+            )
+        ],
+    )
+    expected = _project(
+        project_id="expected-project",
+        name="Gym Membership Services",
+        search_score=0.66,
+        search_rank=11,
+        search_margin=0.0,
+        people=[AssociatedPerson(name="David", email="david@tenant.example")],
+    )
+
+    score = await score_project_candidates(
+        request,
+        [task],
+        [wrong_search_result, expected],
+        thread_context=None,
+        threshold=0.80,
+    )
+
+    assert score is not None
+    assert score.project.project_id == "expected-project"
+    assert score.result.decision_reason == "explicit_project_name_reference"
+    assert "explicit_project_name_reference" in score.result.evidence
+
+
+async def test_generic_scope_heading_does_not_override_stronger_project_people_context():
+    request = EmailExtractionRequest(
+        tenantId="tenant-1",
+        mailbox="david@tenant.example",
+        direction="received",
+        graphEventId="graph-generic-scope",
+        internetMessageId="<generic-scope@example.com>",
+        messageId="generic-scope",
+        subject="Security requirements analysis",
+        bodyText=(
+            "David, please reconcile the security requirements analysis with Priya "
+            "before Friday."
+        ),
+        **{"from": {"email": "lead@external.example", "name": "External Lead"}},
+        to=[{"email": "david@tenant.example", "name": "David"}],
+        cc=[],
+        bcc=[],
+        idempotencyKey="key-generic-scope",
+        correlationId="corr-generic-scope",
+    )
+    task = ExtractedTaskCandidate(
+        sourceTaskId="extracted-task-1",
+        title="Reconcile the security requirements analysis",
+        description="Reconcile the security requirements analysis with Priya.",
+        mentionedPeople=["David", "Priya"],
+        dueText="before Friday",
+        confidence=0.92,
+        evidence=["explicit_task_language"],
+    )
+    wrong_search_result = _project(
+        project_id="wrong-project",
+        name="Internet Monitoring Service",
+        search_score=0.78,
+        search_rank=1,
+        search_margin=0.08,
+        people=[AssociatedPerson(name="Morgan", email="morgan@tenant.example")],
+        scopes=[
+            ProjectScope(
+                scopeId="wrong-scope",
+                title="Security Requirements",
+                description="Personnel security requirements.",
+            )
+        ],
+    )
+    expected = _project(
+        project_id="expected-project",
+        name="Communications Capacity",
+        search_score=0.70,
+        search_rank=6,
+        search_margin=0.0,
+        people=[
+            AssociatedPerson(name="David", email="david@tenant.example"),
+            AssociatedPerson(name="Priya", email="priya@tenant.example"),
+        ],
+    )
+
+    score = await score_project_candidates(
+        request,
+        [task],
+        [wrong_search_result, expected],
+        thread_context=None,
+        threshold=0.80,
+    )
+
+    assert score is not None
+    assert score.project.project_id == "expected-project"
+    assert "explicit_unique_scope_title_reference" not in score.result.evidence
+
+
 async def test_participant_and_weak_text_without_people_context_fail_closed():
     request = EmailExtractionRequest(
         tenantId="tenant-1",

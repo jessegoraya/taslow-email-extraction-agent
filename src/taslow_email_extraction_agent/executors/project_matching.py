@@ -220,6 +220,12 @@ def _score_project(
     search_margin = project.search_margin or 0.0
     if semantic_score:
         evidence.append("azure_ai_search_project_similarity")
+    explicit_project_name_match = _has_explicit_project_name_reference(
+        project,
+        scope_reference_text,
+    )
+    if explicit_project_name_match:
+        evidence.append("explicit_project_name_reference")
     unique_scope_match = _has_unique_scope_title_reference(
         project,
         scope_reference_text,
@@ -249,7 +255,19 @@ def _score_project(
     confidence = weighted_confidence
     decision_reason = "weighted_evidence"
 
-    if unique_scope_match:
+    if explicit_project_name_match:
+        confidence = max(
+            confidence,
+            min(
+                0.98,
+                threshold
+                + 0.12
+                + (participant_score * 0.04)
+                + (people_context_score * 0.02),
+            ),
+        )
+        decision_reason = "explicit_project_name_reference"
+    elif unique_scope_match:
         confidence = max(
             confidence,
             min(
@@ -385,7 +403,8 @@ def _score_project(
         or (project.search_rank == 1 and semantic_score >= 0.78 and search_margin >= 0.05)
     )
     strong_project_anchor = (
-        unique_scope_match
+        explicit_project_name_match
+        or unique_scope_match
         or subject_alias_match
         or thread_score >= threshold
         or (participant_score >= 0.5 and people_context_score > 0)
@@ -454,10 +473,27 @@ def _unique_project_scope_titles(projects: list[ProjectContext]) -> set[str]:
     for project in projects:
         for scope in project.scopes:
             title = _scope_reference_key(scope.title)
-            if len(title) < 12 or len(title.split()) < 2:
+            if (
+                len(title) < 12
+                or len(title.split()) < 2
+                or not _scope_title_is_distinctive(title)
+            ):
                 continue
             owners.setdefault(title, set()).add(project.project_id)
     return {title for title, project_ids in owners.items() if len(project_ids) == 1}
+
+
+def _has_explicit_project_name_reference(project: ProjectContext, text: str) -> bool:
+    project_name = _scope_reference_key(project.project_name)
+    text_key = _scope_reference_key(text)
+    if len(project_name) < 8 or len(project_name.split()) < 2 or not text_key:
+        return False
+    return bool(
+        re.search(
+            rf"(?<![a-z0-9]){re.escape(project_name)}(?![a-z0-9])",
+            text_key,
+        )
+    )
 
 
 def _has_unique_scope_title_reference(
@@ -478,6 +514,15 @@ def _has_unique_scope_title_reference(
 
 def _scope_reference_key(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+
+
+def _scope_title_is_distinctive(title: str) -> bool:
+    tokens = [token for token in _scope_reference_key(title).split() if len(token) > 1]
+    return any(
+        token not in _GENERIC_SCOPE_TITLE_TOKENS
+        and (len(token) >= 4 or any(character.isdigit() for character in token))
+        for token in tokens
+    )
 
 
 def _email_domain(email: str) -> str:
@@ -538,6 +583,48 @@ _COMMON_ALIAS_TOKENS = {
     "systems",
     "the",
     "unit",
+}
+
+
+_GENERIC_SCOPE_TITLE_TOKENS = {
+    "action",
+    "actions",
+    "administration",
+    "analysis",
+    "and",
+    "contract",
+    "contractor",
+    "deliverable",
+    "deliverables",
+    "delivery",
+    "facility",
+    "format",
+    "frequency",
+    "general",
+    "investigation",
+    "investigations",
+    "management",
+    "medium",
+    "operational",
+    "operations",
+    "personnel",
+    "plan",
+    "program",
+    "project",
+    "quality",
+    "report",
+    "reporting",
+    "requirement",
+    "requirements",
+    "review",
+    "section",
+    "security",
+    "service",
+    "services",
+    "support",
+    "task",
+    "tasks",
+    "team",
 }
 
 

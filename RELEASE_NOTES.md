@@ -1,5 +1,14 @@
 # Email Extraction Agent Release Notes
 
+## v0.1.0-dev.12
+
+- Treats a literal full Project-name reference in the current email as the strongest deterministic
+  Project-selection anchor.
+- Prevents generic Scope headings such as security requirements, operational service delivery, and
+  contract management tasks from receiving a decisive unique-Scope boost.
+- Preserves decisive matching for genuinely distinctive Scope titles and leaves stable hosted
+  routing unchanged until targeted and full evaluation gates pass.
+
 ## v0.1.0-dev.11
 
 - Expands fail-closed second-pass recovery for concrete deliverable requests and current
