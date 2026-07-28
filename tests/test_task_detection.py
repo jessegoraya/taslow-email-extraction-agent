@@ -112,6 +112,31 @@ def test_recovery_guard_detects_quoted_request_with_current_handoff(base_request
     assert _task_recovery_reason(base_request) == "forwarded_actionable_handoff"
 
 
+def test_recovery_guard_detects_recipient_grounded_quoted_request(base_request):
+    base_request.body_text = (
+        "> Tessa,\n"
+        ">\n"
+        "> Tessa should validate the Electrical Scope analysis by 2026-08-17.\n\n"
+        "The details above preserve the current conversation."
+    )
+
+    assert (
+        _task_recovery_reason(base_request)
+        == "recipient_grounded_quoted_action_request"
+    )
+
+
+def test_recovery_guard_rejects_recipient_grounded_quote_with_fyi_override(
+    base_request,
+):
+    base_request.body_text = (
+        "FYI only. No action is needed.\n\n"
+        "> Tessa should validate the Electrical Scope analysis by 2026-08-17."
+    )
+
+    assert _task_recovery_reason(base_request) is None
+
+
 def test_recovery_guard_detects_deliverable_deadline_request(base_request):
     base_request.body_text = (
         "The transition discussion is captured below. "
@@ -246,6 +271,21 @@ def test_prompt_payload_includes_complete_forwarded_delivery(base_request):
     assert payload["forwardedDeliveryActionRequest"] is True
 
 
+def test_prompt_payload_includes_recipient_grounded_quoted_request(base_request):
+    base_request.body_text = (
+        "> Tessa,\n"
+        ">\n"
+        "> Tessa should validate the Electrical Scope analysis by 2026-08-17.\n\n"
+        "The details above preserve the current conversation."
+    )
+
+    payload = _request_prompt_payload(base_request)
+
+    assert payload["recipientGroundedQuotedActionRequest"] is True
+    assert payload["forwardedActionableHandoff"] is True
+    assert "Tessa should validate" in payload["forwardedContextText"]
+
+
 async def test_foundry_extractor_recovers_empty_first_pass(base_request):
     base_request.body_text = "Please update the electrical scope before Friday."
     recovered_task = ExtractedTaskCandidate(
@@ -277,6 +317,36 @@ async def test_foundry_extractor_recovers_empty_first_pass(base_request):
     assert extractor.last_run_info.recovery_attempted is True
     assert extractor.last_run_info.recovery_succeeded is True
     assert extractor.last_run_info.recovery_reason == "direct_action_request"
+
+
+async def test_foundry_extractor_marks_recipient_grounded_forwarded_context(
+    base_request,
+):
+    base_request.body_text = (
+        "> Tessa should validate the Electrical Scope analysis by 2026-08-17.\n\n"
+        "The details above preserve the current conversation."
+    )
+    task = ExtractedTaskCandidate(
+        sourceTaskId="task-1",
+        title="Validate the Electrical Scope analysis",
+        description="Validate the Electrical Scope analysis.",
+        mentionedPeople=["Tessa"],
+        dueText=None,
+        confidence=0.93,
+        evidence=["direct_request"],
+    )
+    extractor = _SequencedFoundryTaskExtractor(
+        [
+            ([task], 10, 4),
+        ]
+    )
+
+    tasks = await extractor.extract_tasks(base_request)
+
+    assert "forwarded_actionable_context" in tasks[0].evidence
+    assert "recipient_grounded_quoted_action_request" in tasks[0].evidence
+    assert extractor.last_run_info is not None
+    assert extractor.last_run_info.recovery_attempted is False
 
 
 async def test_foundry_extractor_does_not_reconsider_no_task_control(base_request):

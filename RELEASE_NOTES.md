@@ -1,5 +1,19 @@
 # Email Extraction Agent Release Notes
 
+## v0.1.0-dev.17
+
+- Rejects participant-only and weak-margin Project matches when an actionable email names a
+  Project/workstream that is not present in the tenant Project catalog.
+- Preserves legitimate generic-Scope routing only when an exact selected-Project Scope title,
+  Project-associated participant, and sufficient Search evidence agree.
+- Recognizes recipient-grounded quoted/forwarded requests when the current transport recipient is
+  explicitly named as the actor, while FYI, no-action, completed, and stale-quote controls remain
+  non-actionable.
+- Carries protected forwarded request context into Project Scope and ISO due-date resolution without
+  allowing quoted content to select an assignee or create work on its own.
+- Requires the protected S4 and quoted/thread Dev regression to pass before another full
+  1,500-case BloomSky Test evaluation or stable-route promotion.
+
 ## v0.1.0-dev.16
 
 - Grounds task evidence when a quoted task ends with sentence punctuation but the authored email

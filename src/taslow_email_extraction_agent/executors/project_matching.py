@@ -233,6 +233,9 @@ def _score_project(
     )
     if unique_scope_match:
         evidence.append("explicit_unique_scope_title_reference")
+    scope_title_match = _has_scope_title_reference(project, scope_reference_text)
+    if scope_title_match and not unique_scope_match:
+        evidence.append("explicit_scope_title_reference")
     open_item_signal = _has_unresolved_work_signal(email_text)
     if open_item_signal:
         evidence.append("implicit_open_item_project_signal")
@@ -324,11 +327,26 @@ def _score_project(
         confidence = max(confidence, min(0.92, threshold + 0.02))
         decision_reason = "strong_search_and_text_or_people_evidence"
     elif (
+        scope_title_match
+        and participant_score >= 0.5
+        and semantic_score >= 0.65
+    ):
+        confidence = max(
+            confidence,
+            min(
+                0.90,
+                threshold
+                + 0.02
+                + (participant_score * 0.04)
+                + (people_context_score * 0.02),
+            ),
+        )
+        decision_reason = "explicit_scope_and_participant_evidence"
+    elif (
         participant_score >= 0.5
         and semantic_score >= 0.65
         and (
-            people_context_score >= 0.25
-            or subject_alias_match
+            subject_alias_match
             or body_alias_match
             or client_domain_match
             or thread_score >= threshold
@@ -341,6 +359,8 @@ def _score_project(
         and project.search_rank == 1
         and semantic_score >= 0.68
         and participant_score >= 0.5
+        and search_margin >= 0.02
+        and lexical_score >= 0.08
     ):
         confidence = max(
             confidence,
@@ -405,9 +425,17 @@ def _score_project(
     strong_project_anchor = (
         explicit_project_name_match
         or unique_scope_match
+        or (scope_title_match and participant_score >= 0.5)
         or subject_alias_match
         or thread_score >= threshold
-        or (participant_score >= 0.5 and people_context_score > 0)
+        or (
+            open_item_signal
+            and project.search_rank == 1
+            and semantic_score >= 0.68
+            and participant_score >= 0.5
+            and search_margin >= 0.02
+            and lexical_score >= 0.08
+        )
         or client_domain_unique
         or (
             client_domain_match
@@ -506,6 +534,19 @@ def _has_unique_scope_title_reference(
         return False
     return any(
         title in unique_scope_titles
+        and re.search(rf"(?<![a-z0-9]){re.escape(title)}(?![a-z0-9])", text_key)
+        for title in (_scope_reference_key(scope.title) for scope in project.scopes)
+        if title
+    )
+
+
+def _has_scope_title_reference(project: ProjectContext, text: str) -> bool:
+    text_key = _scope_reference_key(text)
+    if not text_key:
+        return False
+    return any(
+        len(title) >= 8
+        and len(title.split()) >= 2
         and re.search(rf"(?<![a-z0-9]){re.escape(title)}(?![a-z0-9])", text_key)
         for title in (_scope_reference_key(scope.title) for scope in project.scopes)
         if title

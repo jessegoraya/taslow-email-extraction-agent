@@ -171,14 +171,19 @@ async def _build_assignments(
     for task_index, task in enumerate(tasks):
         scored_project = project
         try:
+            scope_search_text = (
+                request.body_text
+                if "forwarded_actionable_context" in task.evidence
+                else task_context_text(request.body_text, task.description)
+            )
             scored_project = await _apply_scope_search_scores(
-                request, services, project, task_context_text(request.body_text, task.description)
+                request, services, project, scope_search_text
             )
         except ProjectSearchUnavailable:
             if services.project_search_client:
                 raise
 
-        scope = _match_explicit_scope_reference(request, scored_project)
+        scope = _match_explicit_scope_reference(request, scored_project, task)
         if scope:
             scope_confidence = 0.98
             scope_evidence = ["explicit_scope_title_reference"]
@@ -514,10 +519,16 @@ async def _apply_scope_search_scores(
 def _match_explicit_scope_reference(
     request: EmailExtractionRequest,
     project: ProjectContext,
+    task: ExtractedTaskCandidate | None = None,
 ) -> ProjectScope | None:
     subject_match = _match_scope_title_in_text(request.subject, project.scopes)
     newest_body, _quoted_context = split_newest_and_quoted_text(request.body_text)
     body_match = _match_scope_title_in_text(newest_body, project.scopes)
+    forwarded_match = (
+        _match_scope_title_in_text(request.body_text, project.scopes)
+        if task and "forwarded_actionable_context" in task.evidence
+        else None
+    )
 
     if (
         subject_match
@@ -527,7 +538,7 @@ def _match_explicit_scope_reference(
         == _normalize_scope_reference_text(project.project_name)
     ):
         return body_match
-    return subject_match or body_match
+    return subject_match or body_match or forwarded_match
 
 
 def _match_scope_title_in_text(
