@@ -66,6 +66,20 @@ async def resolve_assignees(
     )
     task_tokens = token_set(task_text)
 
+    explicit_matches = _explicit_assignment_matches(local_assignment_text, project.people)
+    if not explicit_matches:
+        explicit_matches = _explicit_assignment_matches(task_text, project.people)
+    if not explicit_matches and not local_assignment_text:
+        explicit_matches = _explicit_assignment_matches(authored_text, project.people)
+    if explicit_matches and any(
+        "direct_address_assignment" in evidence
+        for _person, _confidence, evidence in explicit_matches
+    ):
+        owner_matches = _accountable_owner_matches(request, email_task_text, project)
+        if owner_matches and _has_strong_owner_evidence(owner_matches):
+            return owner_matches
+        return explicit_matches
+
     named_deliverable_matches = _named_deliverable_from_matches(
         local_assignment_text,
         project.people,
@@ -78,11 +92,6 @@ async def resolve_assignees(
     if named_deliverable_matches:
         return named_deliverable_matches
 
-    explicit_matches = _explicit_assignment_matches(local_assignment_text, project.people)
-    if not explicit_matches:
-        explicit_matches = _explicit_assignment_matches(task_text, project.people)
-    if not explicit_matches and not local_assignment_text:
-        explicit_matches = _explicit_assignment_matches(authored_text, project.people)
     if explicit_matches:
         if _explicit_matches_are_soft_direct(explicit_matches):
             owner_matches = _accountable_owner_matches(request, email_task_text, project)

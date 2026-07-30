@@ -524,6 +524,12 @@ def _match_explicit_scope_reference(
     subject_match = _match_scope_title_in_text(request.subject, project.scopes)
     newest_body, _quoted_context = split_newest_and_quoted_text(request.body_text)
     body_match = _match_scope_title_in_text(newest_body, project.scopes)
+    if body_match and _scope_is_project_name(body_match, project):
+        explicit_child_match = _match_scope_title_in_text(
+            newest_body,
+            [scope for scope in project.scopes if not _scope_is_project_name(scope, project)],
+        )
+        body_match = explicit_child_match or body_match
     forwarded_match = (
         _match_scope_title_in_text(request.body_text, project.scopes)
         if task and "forwarded_actionable_context" in task.evidence

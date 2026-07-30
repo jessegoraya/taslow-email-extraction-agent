@@ -43,7 +43,7 @@ async def normalize_due_date(
         due = datetime.combine(
             (base + timedelta(days=1)).date(), _extract_time(text, default_due_time)
         )
-        return due, 0.86, evidence
+        return _actionable_due_date(base, due, 0.86, evidence)
 
     for weekday, target in WEEKDAYS.items():
         if weekday in text:
@@ -53,7 +53,7 @@ async def normalize_due_date(
             due = datetime.combine(
                 (base + timedelta(days=days_ahead)).date(), _extract_time(text, default_due_time)
             )
-            return due, 0.84, evidence
+            return _actionable_due_date(base, due, 0.84, evidence)
 
     try:
         default_due = datetime.combine(base.date(), default_due_time)
@@ -61,12 +61,12 @@ async def normalize_due_date(
     except (ValueError, OverflowError):
         return None, None, []
 
-    return parsed, 0.78, evidence
+    return _actionable_due_date(base, parsed, 0.78, evidence)
 
 
 def _extract_due_text(text: str) -> str | None:
     match = re.search(
-        r"\b(?:by|before|due)\s+([A-Z][a-z]+\s+\d{1,2}(?:,\s*\d{4})?|"
+        r"\b(?:by|before|due|through)\s+([A-Z][a-z]+\s+\d{1,2}(?:,\s*\d{4})?|"
         r"\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}(?:/\d{2,4})?|tomorrow|next\s+\w+|"
         r"monday|tuesday|wednesday|thursday|friday|saturday|sunday)",
         text,
@@ -76,8 +76,24 @@ def _extract_due_text(text: str) -> str | None:
 
 
 def _clean_due_text(text: str) -> str:
-    cleaned = re.sub(r"^\s*(by|before|due)\s+", "", text.strip(), flags=re.IGNORECASE)
+    cleaned = re.sub(
+        r"^\s*(by|before|due|through)\s+",
+        "",
+        text.strip(),
+        flags=re.IGNORECASE,
+    )
     return cleaned.strip(" .;,")
+
+
+def _actionable_due_date(
+    base: datetime,
+    due: datetime,
+    confidence: float,
+    evidence: list[str],
+) -> tuple[datetime | None, float | None, list[str]]:
+    if due <= base:
+        return None, None, ["past_due_date_ignored"]
+    return due, confidence, evidence
 
 
 def _extract_time(text: str, default_time: time) -> time:

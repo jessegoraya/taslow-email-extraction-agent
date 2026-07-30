@@ -498,6 +498,39 @@ async def test_named_deliverable_from_person_is_local_to_matching_due_date():
     assert "named_deliverable_source_assignment" in second_matches[0][2]
 
 
+async def test_direct_addressee_beats_weaker_named_deliverable_source_signal():
+    request = _request(
+        body=(
+            "Mei, could you prepare the Systems Engineering and Integration analysis "
+            "by 2026-08-08? I am flagging it against Launch Enterprise so the current "
+            "project review can keep moving.\n\nBest,\nSofia"
+        ),
+        to=[{"email": "mei@tenant.com", "name": "Mei"}],
+        cc=[],
+        direction="received",
+        from_email="sofia@tenant.com",
+    )
+    project = ProjectContext(
+        projectId="project-1",
+        projectName="Launch Enterprise",
+        associatedPeople=[
+            AssociatedPerson(name="Mei Lin", email="mei@tenant.com"),
+            AssociatedPerson(name="Sofia Petrova", email="sofia@tenant.com"),
+        ],
+        associatedManagers=[],
+        scopes=[],
+    )
+    task = _task(
+        "Prepare the Systems Engineering and Integration analysis for Launch Enterprise.",
+        due_text="2026-08-08",
+    )
+
+    matches = await resolve_assignees(request, task, project)
+
+    assert [match[0].email for match in matches] == ["mei@tenant.com"]
+    assert "direct_address_assignment" in matches[0][2]
+
+
 async def test_named_modal_owners_stay_local_to_each_multi_task():
     request = _request(
         body=(

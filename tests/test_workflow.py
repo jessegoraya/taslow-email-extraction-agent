@@ -300,6 +300,35 @@ def test_explicit_scope_reference_prefers_body_when_subject_scope_is_project_nam
     assert match.scope_id == "scope-transition"
 
 
+def test_explicit_child_scope_beats_project_name_repeated_in_body(
+    base_request,
+    project,
+):
+    project.project_name = "Fair Lending and Fair Housing Legal Advisory Services"
+    project.scopes = [
+        ProjectScope(
+            scopeId="scope-project-name",
+            title="Fair Lending And Fair Housing Legal Advisory Services",
+            description="General project introduction.",
+        ),
+        ProjectScope(
+            scopeId="scope-future-deliverables",
+            title="Future Deliverables",
+            description="Future task-order deliverables.",
+        ),
+    ]
+    base_request.subject = "Fair Lending and Fair Housing Legal Advisory Services"
+    base_request.body_text = (
+        "Jesse, please reconcile the Future Deliverables analysis by 2026-08-19 "
+        "for the Fair Lending and Fair Housing Legal Advisory Services project."
+    )
+
+    match = _match_explicit_scope_reference(base_request, project)
+
+    assert match is not None
+    assert match.scope_id == "scope-future-deliverables"
+
+
 def test_explicit_scope_reference_prefers_protected_forwarded_scope_over_project_name(
     base_request,
     project,
