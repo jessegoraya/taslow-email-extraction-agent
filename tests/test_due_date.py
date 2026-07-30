@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from taslow_email_extraction_agent.executors.due_date import normalize_due_date
 from taslow_email_extraction_agent.models import ExtractedTaskCandidate
 
@@ -47,3 +50,59 @@ async def test_stale_quoted_due_date_is_not_used_without_forwarded_marker(base_r
     assert due_date is None
     assert confidence is None
     assert evidence == []
+
+
+async def test_same_day_default_deadline_is_ignored_after_it_has_passed(base_request):
+    base_request.sent_date_time = datetime(
+        2026,
+        8,
+        5,
+        22,
+        48,
+        tzinfo=ZoneInfo("UTC"),
+    )
+    task = ExtractedTaskCandidate(
+        sourceTaskId="task-1",
+        title="Draft the program analysis",
+        description="Draft the program analysis by 2026-08-05.",
+        mentionedPeople=["Yuki"],
+        dueText="2026-08-05",
+        confidence=0.93,
+        evidence=[],
+    )
+
+    due_date, confidence, evidence = await normalize_due_date(base_request, task)
+
+    assert due_date is None
+    assert confidence is None
+    assert evidence == ["past_due_date_ignored"]
+
+
+async def test_through_date_is_normalized_as_a_deadline(base_request):
+    base_request.sent_date_time = datetime(
+        2026,
+        8,
+        5,
+        13,
+        6,
+        tzinfo=ZoneInfo("UTC"),
+    )
+    task = ExtractedTaskCandidate(
+        sourceTaskId="task-1",
+        title="Analyze the government-furnished materials review",
+        description=(
+            "Analyze the government-furnished materials review and keep it open "
+            "as an unresolved item through 2026-08-23."
+        ),
+        mentionedPeople=["Jesse"],
+        dueText=None,
+        confidence=0.93,
+        evidence=[],
+    )
+
+    due_date, confidence, evidence = await normalize_due_date(base_request, task)
+
+    assert due_date is not None
+    assert due_date.isoformat().startswith("2026-08-23T17:00:00")
+    assert confidence == 0.78
+    assert evidence == ["explicit_due_date"]
