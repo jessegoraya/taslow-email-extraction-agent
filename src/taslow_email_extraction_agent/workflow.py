@@ -4,6 +4,9 @@ from dataclasses import dataclass
 from uuid import uuid4
 
 from taslow_email_extraction_agent.agent_framework_compat import workflow
+from taslow_email_extraction_agent.clients.project_client import (
+    ProjectCandidateDiscoveryUnavailable,
+)
 from taslow_email_extraction_agent.clients.project_search_client import ProjectSearchUnavailable
 from taslow_email_extraction_agent.executors.assignee_resolution import resolve_assignees
 from taslow_email_extraction_agent.executors.due_date import normalize_due_date
@@ -87,8 +90,12 @@ async def email_extraction_workflow(message: WorkflowInput) -> EmailExtractionRe
     search_text = " ".join([request.combined_text, *[task.description for task in tasks]])
     try:
         projects = await _retrieve_projects(request, services, search_text)
-    except ProjectSearchUnavailable:
-        warnings.append("azure_ai_search_dependency_failure")
+    except (ProjectSearchUnavailable, ProjectCandidateDiscoveryUnavailable) as exc:
+        warnings.append(
+            "project_participant_candidate_dependency_failure"
+            if isinstance(exc, ProjectCandidateDiscoveryUnavailable)
+            else "azure_ai_search_dependency_failure"
+        )
         return _retryable_response(
             request=request,
             services=services,
@@ -464,23 +471,47 @@ async def _retrieve_projects(
     candidates = await services.project_search_client.search_projects(
         request.tenant_id, search_text
     )
+    participant_emails = sorted(
+        {
+            participant.email
+            for participant in [request.from_participant, *request.visible_recipients]
+            if participant and participant.email
+        }
+    )
+    participant_project_ids = await services.project_client.get_participant_project_candidates(
+        request.tenant_id, participant_emails
+    )
+    candidates_by_id = {candidate.project_id: candidate for candidate in candidates}
+    project_ids = list(
+        dict.fromkeys(
+            [candidate.project_id for candidate in candidates] + participant_project_ids
+        )
+    )
     projects_by_id = {
         project.project_id: project
         for project in await services.project_client.get_project_context_batch(
-            request.tenant_id, [candidate.project_id for candidate in candidates]
+            request.tenant_id, project_ids
         )
     }
     projects = []
-    for candidate in candidates:
-        project = projects_by_id.get(candidate.project_id)
+    participant_project_id_set = set(participant_project_ids)
+    for project_id in project_ids:
+        project = projects_by_id.get(project_id)
         if project:
+            candidate = candidates_by_id.get(project_id)
+            candidate_sources = []
+            if candidate:
+                candidate_sources.append("azure_ai_search")
+            if project_id in participant_project_id_set:
+                candidate_sources.append("participant_overlap")
             projects.append(
                 project.model_copy(
                     update={
-                        "search_score": candidate.score,
-                        "search_score_raw": candidate.score_raw,
-                        "search_rank": candidate.rank,
-                        "search_margin": candidate.score_margin,
+                        "search_score": candidate.score if candidate else None,
+                        "search_score_raw": candidate.score_raw if candidate else None,
+                        "search_rank": candidate.rank if candidate else None,
+                        "search_margin": candidate.score_margin if candidate else None,
+                        "candidate_sources": candidate_sources,
                     }
                 )
             )
@@ -738,6 +769,11 @@ def _project_scoring_diagnostics(
         searchRank=project_match.search_rank,
         searchMargin=project_match.search_margin,
         participantScore=project_match.participant_score,
+        participantOverlapCount=project_match.participant_overlap_count,
+        participantOverlapRatio=project_match.participant_overlap_ratio,
+        recipientOverlapCount=project_match.recipient_overlap_count,
+        senderProjectMember=project_match.sender_project_member,
+        senderRecipientSharedProject=project_match.sender_recipient_shared_project,
         peopleContextScore=project_match.people_context_score,
         clientDomainScore=project_match.client_domain_score,
         lexicalScore=project_match.lexical_score,

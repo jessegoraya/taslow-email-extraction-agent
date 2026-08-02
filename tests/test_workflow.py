@@ -13,12 +13,14 @@ from taslow_email_extraction_agent.models import (
     ExtractedTaskCandidate,
     ExtractionStatus,
     Participant,
+    ProjectContext,
     ProjectScope,
 )
 from taslow_email_extraction_agent.workflow import (
     _apply_ordered_multi_task_recipient,
     _match_explicit_scope_reference,
     _normalize_assignees_for_task,
+    _retrieve_projects,
     _rewrite_ordered_multi_task_assignments,
     run_email_extraction,
 )
@@ -80,6 +82,24 @@ async def test_azure_search_candidates_are_hydrated_from_project_service(base_re
     assert response.diagnostics.project_scoring.search_rank == 1
     assert response.diagnostics.project_candidate_scores
     assert response.diagnostics.project_candidate_scores[0].project_id == "project-1"
+
+
+async def test_participant_candidates_expand_beyond_semantic_search(
+    base_request, services, project
+):
+    semantic_only = ProjectContext(
+        projectId="semantic-only",
+        projectName="Education Program Support",
+        associatedPeople=[AssociatedPerson(name="Morgan", email="morgan@tenant.com")],
+    )
+    services.project_client = InMemoryProjectClient([semantic_only, project])
+    services.project_search_client = SemanticOnlyProjectSearchClient()
+
+    projects = await _retrieve_projects(base_request, services, "draft status package")
+
+    assert [candidate.project_id for candidate in projects] == ["semantic-only", "project-1"]
+    assert projects[0].candidate_sources == ["azure_ai_search"]
+    assert projects[1].candidate_sources == ["participant_overlap"]
 
 
 async def test_azure_search_failure_returns_retryable(base_request, services):
@@ -559,6 +579,20 @@ class FailingProjectSearchClient:
         self, tenant_id: str, project_id: str, query_text: str
     ) -> list[SearchCandidate]:
         raise ProjectSearchUnavailable("boom")
+
+
+class SemanticOnlyProjectSearchClient(FakeProjectSearchClient):
+    async def search_projects(self, tenant_id: str, query_text: str) -> list[SearchCandidate]:
+        return [
+            SearchCandidate(
+                project_id="semantic-only",
+                scope_id=None,
+                score=0.94,
+                rank=1,
+                score_raw=0.94,
+                score_margin=0.2,
+            )
+        ]
 
 
 class CapturingScopeSearchClient(FakeProjectSearchClient):
