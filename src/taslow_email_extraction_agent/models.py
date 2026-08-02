@@ -139,6 +139,7 @@ class ProjectContext(BaseModel):
     search_score_raw: float | None = Field(default=None, alias="searchScoreRaw")
     search_rank: int | None = Field(default=None, alias="searchRank")
     search_margin: float | None = Field(default=None, alias="searchMargin")
+    candidate_sources: list[str] = Field(default_factory=list, alias="candidateSources")
     client_domains: list[str] = Field(default_factory=list, alias="clientDomains")
     associated_people: list[AssociatedPerson] = Field(
         default_factory=list, alias="associatedPeople"
@@ -197,6 +198,13 @@ class ProjectMatchResult(BaseModel):
     search_rank: int | None = Field(default=None, alias="searchRank")
     search_margin: float | None = Field(default=None, alias="searchMargin")
     participant_score: float | None = Field(default=None, alias="participantScore")
+    participant_overlap_count: int = Field(default=0, alias="participantOverlapCount")
+    participant_overlap_ratio: float | None = Field(default=None, alias="participantOverlapRatio")
+    recipient_overlap_count: int = Field(default=0, alias="recipientOverlapCount")
+    sender_project_member: bool = Field(default=False, alias="senderProjectMember")
+    sender_recipient_shared_project: bool = Field(
+        default=False, alias="senderRecipientSharedProject"
+    )
     people_context_score: float | None = Field(default=None, alias="peopleContextScore")
     client_domain_score: float | None = Field(default=None, alias="clientDomainScore")
     lexical_score: float | None = Field(default=None, alias="lexicalScore")
@@ -210,6 +218,13 @@ class ProjectScoringDiagnostics(BaseModel):
     search_rank: int | None = Field(default=None, alias="searchRank")
     search_margin: float | None = Field(default=None, alias="searchMargin")
     participant_score: float | None = Field(default=None, alias="participantScore")
+    participant_overlap_count: int = Field(default=0, alias="participantOverlapCount")
+    participant_overlap_ratio: float | None = Field(default=None, alias="participantOverlapRatio")
+    recipient_overlap_count: int = Field(default=0, alias="recipientOverlapCount")
+    sender_project_member: bool = Field(default=False, alias="senderProjectMember")
+    sender_recipient_shared_project: bool = Field(
+        default=False, alias="senderRecipientSharedProject"
+    )
     people_context_score: float | None = Field(default=None, alias="peopleContextScore")
     client_domain_score: float | None = Field(default=None, alias="clientDomainScore")
     lexical_score: float | None = Field(default=None, alias="lexicalScore")

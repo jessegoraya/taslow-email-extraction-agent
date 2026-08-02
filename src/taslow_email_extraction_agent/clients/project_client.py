@@ -10,6 +10,10 @@ from taslow_email_extraction_agent.models import AssociatedPerson, ProjectContex
 from taslow_email_extraction_agent.service_auth import ManagedIdentityRequestAuthenticator
 
 
+class ProjectCandidateDiscoveryUnavailable(RuntimeError):
+    """Participant-based Project candidate discovery could not be completed."""
+
+
 class ProjectClient(Protocol):
     async def get_active_projects(self, tenant_id: str) -> list[ProjectContext]:
         """Return active tenant projects with enough context for candidate scoring."""
@@ -21,6 +25,11 @@ class ProjectClient(Protocol):
         self, tenant_id: str, project_ids: list[str]
     ) -> list[ProjectContext]:
         """Return service-friendly Project context for selected Project IDs."""
+
+    async def get_participant_project_candidates(
+        self, tenant_id: str, participant_emails: list[str]
+    ) -> list[str]:
+        """Return active Project IDs containing at least one email participant."""
 
 
 class InMemoryProjectClient:
@@ -41,6 +50,19 @@ class InMemoryProjectClient:
     ) -> list[ProjectContext]:
         wanted = set(project_ids)
         return [project for project in self._projects if project.project_id in wanted]
+
+    async def get_participant_project_candidates(
+        self, tenant_id: str, participant_emails: list[str]
+    ) -> list[str]:
+        participants = {email.strip().lower() for email in participant_emails if email.strip()}
+        matches = []
+        for project in self._projects:
+            project_emails = {person.email for person in project.people if person.email}
+            overlap_count = len(participants & project_emails)
+            if overlap_count:
+                matches.append((project.project_id, overlap_count))
+        ordered_matches = sorted(matches, key=lambda item: (-item[1], item[0]))
+        return [project_id for project_id, _ in ordered_matches]
 
 
 class HttpProjectClient:
@@ -131,6 +153,41 @@ class HttpProjectClient:
 
         rows = body if isinstance(body, list) else body.get("projects", [])
         return [self._map_project(row) for row in rows]
+
+    async def get_participant_project_candidates(
+        self, tenant_id: str, participant_emails: list[str]
+    ) -> list[str]:
+        normalized_emails = sorted(
+            {email.strip().lower() for email in participant_emails if email.strip()}
+        )
+        if not normalized_emails:
+            return []
+
+        headers = await self._get_headers()
+        try:
+            async with httpx.AsyncClient(timeout=20.0, transport=self._transport) as client:
+                response = await client.post(
+                    self._url("/internal/projects/participant-candidates"),
+                    headers=headers,
+                    json={"tenantId": tenant_id, "participantEmails": normalized_emails},
+                )
+                response.raise_for_status()
+                body = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            raise ProjectCandidateDiscoveryUnavailable(
+                "Participant Project candidate discovery failed."
+            ) from exc
+
+        if not isinstance(body, (dict, list)):
+            raise ProjectCandidateDiscoveryUnavailable(
+                "Participant Project candidate response is invalid."
+            )
+        rows = body if isinstance(body, list) else body.get("projects", [])
+        return [
+            str(row.get("projectId", "")).strip()
+            for row in rows
+            if str(row.get("projectId", "")).strip()
+        ]
 
     async def _fallback_project_detail_batch(
         self, tenant_id: str, project_ids: list[str]

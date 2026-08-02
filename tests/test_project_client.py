@@ -59,6 +59,51 @@ async def test_project_context_uses_managed_identity_and_maps_response() -> None
     assert projects[0].scopes[0].group_task_set_id == "gts-1"
 
 
+async def test_participant_candidates_use_managed_identity_and_normalize_request() -> None:
+    credential = FakeCredential()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["Authorization"] == "Bearer project-token"
+        assert request.url.path.endswith("/internal/projects/participant-candidates")
+        payload = json.loads(request.content)
+        assert payload == {
+            "tenantId": "tenant-1",
+            "participantEmails": [
+                "alex@bloomsky.onmicrosoft.com",
+                "paco@bloomsky.onmicrosoft.com",
+            ],
+        }
+        return httpx.Response(
+            200,
+            json={
+                "projects": [
+                    {
+                        "projectId": "va-radiology",
+                        "matchedParticipantEmails": payload["participantEmails"],
+                    }
+                ]
+            },
+        )
+
+    client = HttpProjectClient(
+        "https://apim.example.test/FunctionProjectApp",
+        token_scope="https://management.azure.com/.default",
+        credential=credential,
+        transport=httpx.MockTransport(handler),
+    )
+
+    project_ids = await client.get_participant_project_candidates(
+        "tenant-1",
+        [
+            "PACO@bloomsky.onmicrosoft.com",
+            "alex@bloomsky.onmicrosoft.com",
+            "paco@bloomsky.onmicrosoft.com",
+        ],
+    )
+
+    assert project_ids == ["va-radiology"]
+
+
 async def test_project_client_fails_closed_without_authentication() -> None:
     client = HttpProjectClient("https://apim.example.test/FunctionProjectApp")
 

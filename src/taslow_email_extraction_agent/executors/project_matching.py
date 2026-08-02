@@ -25,6 +25,16 @@ class ProjectScore:
     candidate_results: list[ProjectMatchResult] = field(default_factory=list)
 
 
+@dataclass(slots=True)
+class ParticipantOverlapProfile:
+    sender_email: str
+    sender_shares_recipient_domain: bool
+    recipient_emails: set[str]
+    matched_emails_by_project: dict[str, set[str]]
+    sender_recipient_project_ids: set[str]
+    strongest_overlap_project_ids: set[str]
+
+
 @step(name="ProjectCandidateRetrievalExecutor")
 async def retrieve_project_candidates(projects: list[ProjectContext]) -> list[ProjectContext]:
     return projects
@@ -49,6 +59,14 @@ async def score_project_candidates(
     participant_names = {p.name.lower() for p in request.visible_recipients if p.name}
     participant_weights = _participant_project_weights(projects, participant_emails)
     sender_email = request.from_participant.email if request.from_participant else ""
+    recipient_emails = {
+        participant.email for participant in request.visible_recipients if participant.email
+    }
+    participant_overlap = _participant_overlap_profile(
+        projects,
+        sender_email,
+        recipient_emails,
+    )
     client_domain_counts = _client_domain_project_counts(projects)
     unique_scope_titles = _unique_project_scope_titles(projects)
     scope_reference_text = " ".join(
@@ -68,6 +86,7 @@ async def score_project_candidates(
                 email_text,
                 participant_emails,
                 participant_weights,
+                participant_overlap,
                 participant_names,
                 sender_email,
                 client_domain_counts,
@@ -126,16 +145,22 @@ async def score_project_candidates(
     )
 
 
-def _project_primary_selection_key(item: ProjectScore) -> tuple[float, float, float]:
+def _project_primary_selection_key(
+    item: ProjectScore,
+) -> tuple[float, bool, int, float, float]:
     result = item.result
     return (
         result.confidence,
+        result.sender_recipient_shared_project,
+        result.participant_overlap_count,
         result.participant_score or 0.0,
         result.people_context_score or 0.0,
     )
 
 
-def _project_selection_key(item: ProjectScore) -> tuple[float, float, float, float]:
+def _project_selection_key(
+    item: ProjectScore,
+) -> tuple[float, bool, int, float, float, float]:
     result = item.result
     weighted_evidence = (
         ((result.client_domain_score or 0.0) * 0.18)
@@ -152,6 +177,7 @@ def _score_project(
     email_text: str,
     participant_emails: set[str],
     participant_weights: dict[str, float],
+    participant_overlap: ParticipantOverlapProfile,
     participant_names: set[str],
     sender_email: str,
     client_domain_counts: dict[str, int],
@@ -164,6 +190,24 @@ def _score_project(
 
     project_people_emails = {person.email for person in project.people if person.email}
     overlapping_emails = participant_emails & project_people_emails
+    recipient_overlapping_emails = participant_overlap.recipient_emails & project_people_emails
+    participant_overlap_count = len(overlapping_emails)
+    recipient_overlap_count = len(recipient_overlapping_emails)
+    participant_overlap_ratio = participant_overlap_count / max(1, len(participant_emails))
+    sender_project_member = bool(
+        participant_overlap.sender_email
+        and participant_overlap.sender_email in project_people_emails
+    )
+    sender_recipient_shared_project = sender_project_member and recipient_overlap_count > 0
+    unique_sender_recipient_project = (
+        sender_recipient_shared_project
+        and participant_overlap.sender_shares_recipient_domain
+        and participant_overlap.sender_recipient_project_ids == {project.project_id}
+    )
+    unique_strongest_participant_overlap = (
+        participant_overlap_count >= 2
+        and participant_overlap.strongest_overlap_project_ids == {project.project_id}
+    )
     participant_score = min(
         1.0,
         sum(participant_weights.get(email, 1.0) for email in overlapping_emails)
@@ -171,6 +215,21 @@ def _score_project(
     )
     if participant_score:
         evidence.append("recipient_or_sender_overlap")
+    if sender_project_member:
+        evidence.append("sender_project_member")
+    if recipient_overlap_count:
+        evidence.append("recipient_project_member")
+    if participant_overlap_count >= 2:
+        evidence.append("multi_participant_project_overlap")
+    if sender_recipient_shared_project:
+        evidence.append("sender_recipient_shared_project")
+    if "participant_overlap" in project.candidate_sources:
+        evidence.append("participant_project_candidate")
+    if (
+        "participant_overlap" in project.candidate_sources
+        and "azure_ai_search" not in project.candidate_sources
+    ):
+        evidence.append("participant_project_candidate_expansion")
     if any(participant_weights.get(email, 1.0) < 1.0 for email in overlapping_emails):
         evidence.append("ubiquitous_participant_deweighted")
 
@@ -239,6 +298,14 @@ def _score_project(
     open_item_signal = _has_unresolved_work_signal(email_text)
     if open_item_signal:
         evidence.append("implicit_open_item_project_signal")
+    unmatched_workstream_reference = _has_unmatched_workstream_reference(
+        scope_reference_text,
+        explicit_project_name_match=explicit_project_name_match,
+        project_alias_match=subject_alias_match or body_alias_match,
+        scope_title_match=scope_title_match,
+    )
+    if unmatched_workstream_reference:
+        evidence.append("unmatched_explicit_workstream_reference")
 
     thread_score = 0.0
     if thread_context and thread_context.project_id == project.project_id:
@@ -282,6 +349,51 @@ def _score_project(
             ),
         )
         decision_reason = "explicit_unique_scope_title_reference"
+    elif (
+        unique_sender_recipient_project
+        and not unmatched_workstream_reference
+        and not (subject_alias_match or body_alias_match or scope_title_match)
+        and thread_score < threshold
+    ):
+        confidence = max(
+            confidence,
+            min(
+                0.94,
+                threshold
+                + 0.07
+                + min(0.05, max(0, participant_overlap_count - 2) * 0.02)
+                + (people_context_score * 0.02),
+            ),
+        )
+        decision_reason = "unique_sender_recipient_project_overlap"
+        evidence.append("unique_sender_recipient_project_overlap")
+    elif (
+        unique_strongest_participant_overlap
+        and not unmatched_workstream_reference
+        and not (subject_alias_match or body_alias_match or scope_title_match)
+        and thread_score < threshold
+        and (
+            participant_overlap.sender_shares_recipient_domain
+            or recipient_overlap_count >= 2
+        )
+        and (
+            people_context_score > 0
+            or lexical_score >= 0.04
+            or semantic_score >= 0.55
+        )
+    ):
+        confidence = max(
+            confidence,
+            min(
+                0.91,
+                threshold
+                + 0.08
+                + min(0.04, max(0, participant_overlap_count - 2) * 0.02)
+                + (people_context_score * 0.02),
+            ),
+        )
+        decision_reason = "strongest_participant_project_overlap"
+        evidence.append("strongest_participant_project_overlap")
     elif subject_alias_match and semantic_score >= 0.65 and project.search_rank == 1:
         confidence = max(
             confidence,
@@ -458,6 +570,11 @@ def _score_project(
         searchRank=project.search_rank,
         searchMargin=project.search_margin,
         participantScore=round(participant_score, 3),
+        participantOverlapCount=participant_overlap_count,
+        participantOverlapRatio=round(participant_overlap_ratio, 3),
+        recipientOverlapCount=recipient_overlap_count,
+        senderProjectMember=sender_project_member,
+        senderRecipientSharedProject=sender_recipient_shared_project,
         peopleContextScore=round(people_context_score, 3),
         clientDomainScore=round(client_domain_score, 3) if client_domain_score else None,
         lexicalScore=round(lexical_score, 3),
@@ -486,6 +603,47 @@ def _participant_project_weights(
         ratio = count / project_count if project_count else 0.0
         weights[email] = 0.15 if count >= 3 and ratio >= 0.50 else 1.0
     return weights
+
+
+def _participant_overlap_profile(
+    projects: list[ProjectContext],
+    sender_email: str,
+    recipient_emails: set[str],
+) -> ParticipantOverlapProfile:
+    participant_emails = set(recipient_emails)
+    if sender_email:
+        participant_emails.add(sender_email)
+    recipient_domains = {_email_domain(email) for email in recipient_emails if email}
+    sender_shares_recipient_domain = bool(
+        sender_email and _email_domain(sender_email) in recipient_domains
+    )
+
+    matched_emails_by_project: dict[str, set[str]] = {}
+    sender_recipient_project_ids: set[str] = set()
+    for project in projects:
+        project_emails = {person.email for person in project.people if person.email}
+        matched_emails = participant_emails & project_emails
+        matched_emails_by_project[project.project_id] = matched_emails
+        if sender_email in project_emails and recipient_emails & project_emails:
+            sender_recipient_project_ids.add(project.project_id)
+
+    max_overlap = max(
+        (len(emails) for emails in matched_emails_by_project.values()),
+        default=0,
+    )
+    strongest_overlap_project_ids = {
+        project_id
+        for project_id, matched_emails in matched_emails_by_project.items()
+        if max_overlap >= 2 and len(matched_emails) == max_overlap
+    }
+    return ParticipantOverlapProfile(
+        sender_email=sender_email,
+        sender_shares_recipient_domain=sender_shares_recipient_domain,
+        recipient_emails=recipient_emails,
+        matched_emails_by_project=matched_emails_by_project,
+        sender_recipient_project_ids=sender_recipient_project_ids,
+        strongest_overlap_project_ids=strongest_overlap_project_ids,
+    )
 
 
 def _client_domain_project_counts(projects: list[ProjectContext]) -> dict[str, int]:
@@ -578,6 +736,27 @@ def _has_unresolved_work_signal(text: str) -> bool:
             r"\b(?:open\s+item|remaining\s+gap|still\s+outstanding|"
             r"at\s+risk\s+of\s+slipping|yours\s+to\s+drive|"
             r"needs?\s+to\s+be\s+(?:resolved|cleared|closed|updated|preserved))\b",
+            text,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _has_unmatched_workstream_reference(
+    text: str,
+    *,
+    explicit_project_name_match: bool,
+    project_alias_match: bool,
+    scope_title_match: bool,
+) -> bool:
+    if explicit_project_name_match or project_alias_match or scope_title_match:
+        return False
+    return bool(
+        re.search(
+            r"\b(?:this|that|the|another|new)\s+"
+            r"(?:project|program|workstream|initiative)\b|"
+            r"\b(?:project|program|workstream|initiative)\s+"
+            r"(?:named|called|code[- ]named)\b",
             text,
             re.IGNORECASE,
         )

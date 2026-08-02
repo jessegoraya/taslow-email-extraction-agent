@@ -118,6 +118,197 @@ async def test_equal_confidence_prefers_stronger_project_participant_overlap():
     assert score.result.confidence < 0.80
 
 
+async def test_unique_sender_recipient_project_beats_sender_only_semantic_candidate():
+    request = EmailExtractionRequest(
+        tenantId="tenant-1",
+        mailbox="paco@bloomsky.onmicrosoft.com",
+        direction="received",
+        graphEventId="graph-shared-project",
+        internetMessageId="<shared-project@bloomsky.onmicrosoft.com>",
+        messageId="shared-project",
+        subject="Draft status package",
+        bodyText="Paco, please prepare the draft status package for Friday's review.",
+        **{"from": {"email": "alex@bloomsky.onmicrosoft.com", "name": "Alex"}},
+        to=[{"email": "paco@bloomsky.onmicrosoft.com", "name": "Paco"}],
+        cc=[],
+        bcc=[],
+        idempotencyKey="key-shared-project",
+        correlationId="corr-shared-project",
+    )
+    task = ExtractedTaskCandidate(
+        sourceTaskId="task-1",
+        title="Prepare the draft status package",
+        description="Prepare the draft status package for Friday's review.",
+        mentionedPeople=["Paco"],
+        confidence=0.93,
+        evidence=["explicit_task_language"],
+    )
+    education = _project(
+        project_id="education",
+        name="Education Wwc Pesto",
+        search_score=0.92,
+        search_rank=1,
+        search_margin=0.18,
+        people=[AssociatedPerson(name="Alex", email="alex@bloomsky.onmicrosoft.com")],
+    )
+    va_radiology = _project(
+        project_id="va-radiology",
+        name="VA Radiology Staffing and Medical Support",
+        search_score=0.0,
+        search_rank=0,
+        search_margin=0.0,
+        people=[
+            AssociatedPerson(name="Alex", email="alex@bloomsky.onmicrosoft.com"),
+            AssociatedPerson(name="Paco", email="paco@bloomsky.onmicrosoft.com"),
+        ],
+    ).model_copy(update={"candidate_sources": ["participant_overlap"]})
+
+    score = await score_project_candidates(
+        request,
+        [task],
+        [education, va_radiology],
+        thread_context=None,
+        threshold=0.80,
+    )
+
+    assert score is not None
+    assert score.project.project_id == "va-radiology"
+    assert score.result.confidence >= 0.80
+    assert score.result.decision_reason == "unique_sender_recipient_project_overlap"
+    assert score.result.participant_overlap_count == 2
+    assert score.result.recipient_overlap_count == 1
+    assert score.result.sender_project_member is True
+    assert "participant_project_candidate_expansion" in score.result.evidence
+
+
+async def test_highest_multi_participant_overlap_precedes_semantic_tiebreak():
+    request = EmailExtractionRequest(
+        tenantId="tenant-1",
+        mailbox="paco@tenant.example",
+        direction="received",
+        graphEventId="graph-multi-overlap",
+        internetMessageId="<multi-overlap@tenant.example>",
+        messageId="multi-overlap",
+        subject="Review package",
+        bodyText="Paco and Tessa, please finish the review package by Friday.",
+        **{"from": {"email": "alex@tenant.example", "name": "Alex"}},
+        to=[
+            {"email": "paco@tenant.example", "name": "Paco"},
+            {"email": "tessa@tenant.example", "name": "Tessa"},
+        ],
+        cc=[],
+        bcc=[],
+        idempotencyKey="key-multi-overlap",
+        correlationId="corr-multi-overlap",
+    )
+    task = ExtractedTaskCandidate(
+        sourceTaskId="task-1",
+        title="Finish the review package",
+        description="Paco and Tessa should finish the review package by Friday.",
+        mentionedPeople=["Paco", "Tessa"],
+        confidence=0.93,
+        evidence=["explicit_task_language"],
+    )
+    two_person_project = _project(
+        project_id="two-person",
+        name="Semantic Review Support",
+        search_score=0.91,
+        search_rank=1,
+        search_margin=0.15,
+        people=[
+            AssociatedPerson(name="Alex", email="alex@tenant.example"),
+            AssociatedPerson(name="Paco", email="paco@tenant.example"),
+        ],
+    )
+    three_person_project = _project(
+        project_id="three-person",
+        name="Joint Review Support",
+        search_score=0.62,
+        search_rank=5,
+        search_margin=0.0,
+        people=[
+            AssociatedPerson(name="Alex", email="alex@tenant.example"),
+            AssociatedPerson(name="Paco", email="paco@tenant.example"),
+            AssociatedPerson(name="Tessa", email="tessa@tenant.example"),
+        ],
+    )
+
+    score = await score_project_candidates(
+        request,
+        [task],
+        [two_person_project, three_person_project],
+        thread_context=None,
+        threshold=0.80,
+    )
+
+    assert score is not None
+    assert score.project.project_id == "three-person"
+    assert score.result.decision_reason == "strongest_participant_project_overlap"
+    assert score.result.participant_overlap_count == 3
+
+
+async def test_tied_sender_recipient_overlap_uses_semantic_context():
+    request = EmailExtractionRequest(
+        tenantId="tenant-1",
+        mailbox="paco@tenant.example",
+        direction="received",
+        graphEventId="graph-overlap-tie",
+        internetMessageId="<overlap-tie@tenant.example>",
+        messageId="overlap-tie",
+        subject="Radiology staffing package",
+        bodyText="Paco, please prepare the radiology staffing package by Friday.",
+        **{"from": {"email": "alex@tenant.example", "name": "Alex"}},
+        to=[{"email": "paco@tenant.example", "name": "Paco"}],
+        cc=[],
+        bcc=[],
+        idempotencyKey="key-overlap-tie",
+        correlationId="corr-overlap-tie",
+    )
+    task = ExtractedTaskCandidate(
+        sourceTaskId="task-1",
+        title="Prepare the radiology staffing package",
+        description="Prepare the radiology staffing package by Friday.",
+        mentionedPeople=["Paco"],
+        confidence=0.93,
+        evidence=["explicit_task_language"],
+    )
+    semantically_expected = _project(
+        project_id="radiology",
+        name="Radiology Staffing Support",
+        search_score=0.86,
+        search_rank=1,
+        search_margin=0.18,
+        people=[
+            AssociatedPerson(name="Alex", email="alex@tenant.example"),
+            AssociatedPerson(name="Paco", email="paco@tenant.example"),
+        ],
+    )
+    weaker_context = _project(
+        project_id="training",
+        name="Training Support",
+        search_score=0.64,
+        search_rank=3,
+        search_margin=0.0,
+        people=[
+            AssociatedPerson(name="Alex", email="alex@tenant.example"),
+            AssociatedPerson(name="Paco", email="paco@tenant.example"),
+        ],
+    )
+
+    score = await score_project_candidates(
+        request,
+        [task],
+        [weaker_context, semantically_expected],
+        thread_context=None,
+        threshold=0.80,
+    )
+
+    assert score is not None
+    assert score.project.project_id == "radiology"
+    assert score.result.participant_overlap_count == 2
+    assert score.result.decision_reason == "strong_search_and_participant_evidence"
+
+
 async def test_participants_alone_do_not_match_an_unknown_named_workstream():
     request = EmailExtractionRequest(
         tenantId="tenant-1",
