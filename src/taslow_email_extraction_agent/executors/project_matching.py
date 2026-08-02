@@ -753,7 +753,7 @@ def _has_unmatched_workstream_reference(
         return False
     return bool(
         re.search(
-            r"\b(?:this|that|the|another|new)\s+"
+            r"\b(?:that|another|new)\s+"
             r"(?:project|program|workstream|initiative)\b|"
             r"\b(?:project|program|workstream|initiative)\s+"
             r"(?:named|called|code[- ]named)\b",

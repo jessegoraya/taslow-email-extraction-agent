@@ -363,6 +363,72 @@ async def test_participants_alone_do_not_match_an_unknown_named_workstream():
     assert score.result.decision_reason == "weighted_evidence"
 
 
+async def test_generic_project_language_uses_unique_sender_recipient_overlap():
+    request = EmailExtractionRequest(
+        tenantId="tenant-1",
+        mailbox="alex@tenant.example",
+        direction="sent",
+        graphEventId="graph-generic-project",
+        internetMessageId="<generic-project@example.com>",
+        messageId="generic-project",
+        subject="Delivery reporting package and action log",
+        bodyText=(
+            "Paco, please review the latest project materials and prepare a draft "
+            "status package. Please also update the project action log and send the "
+            "completed draft to me by Thursday at 3:00 PM. This is part of the "
+            "project's ongoing delivery coordination and reporting work."
+        ),
+        **{"from": {"email": "alex@tenant.example", "name": "Alex"}},
+        to=[{"email": "paco@tenant.example", "name": "Paco"}],
+        cc=[],
+        bcc=[],
+        idempotencyKey="key-generic-project",
+        correlationId="corr-generic-project",
+    )
+    task = ExtractedTaskCandidate(
+        sourceTaskId="extracted-task-1",
+        title="Prepare the draft status package",
+        description="Prepare the draft status package and update the project action log.",
+        mentionedPeople=["Paco"],
+        dueText="Thursday at 3:00 PM",
+        confidence=0.94,
+        evidence=["explicit_task_language"],
+    )
+    expected = _project(
+        project_id="va-radiology",
+        name="VA Radiology Staffing and Medical Support",
+        search_score=0.57,
+        search_rank=13,
+        search_margin=0.0,
+        people=[
+            AssociatedPerson(name="Alex", email="alex@tenant.example"),
+            AssociatedPerson(name="Paco", email="paco@tenant.example"),
+        ],
+    )
+    semantic_decoy = _project(
+        project_id="reporting-support",
+        name="Delivery Reporting Support",
+        search_score=0.72,
+        search_rank=1,
+        search_margin=0.02,
+        people=[AssociatedPerson(name="Paco", email="paco@other.example")],
+    )
+
+    score = await score_project_candidates(
+        request,
+        [task],
+        [semantic_decoy, expected],
+        thread_context=None,
+        threshold=0.80,
+    )
+
+    assert score is not None
+    assert score.project.project_id == "va-radiology"
+    assert score.result.confidence >= 0.80
+    assert score.result.decision_reason == "unique_sender_recipient_project_overlap"
+    assert "unmatched_explicit_workstream_reference" not in score.result.evidence
+
+
 async def test_exact_generic_scope_and_participants_can_match_project():
     request = EmailExtractionRequest(
         tenantId="tenant-1",
