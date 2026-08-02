@@ -1,5 +1,15 @@
 # Email Extraction Agent Release Notes
 
+## v0.1.0-dev.19
+
+- Treats ordinary omitted-name phrases such as `the project`, `this project`, `project materials`,
+  and `project action log` as generic context rather than an unmatched named workstream.
+- Allows a unique internal sender-recipient Project overlap to remain the predominant signal for
+  those delegations while preserving fail-closed handling for genuinely conflicting or unknown
+  Project, program, initiative, and workstream references.
+- Adds the Alex-to-Paco Test HAT reporting-package regression and retains its explicit unknown-
+  workstream negative control.
+
 ## v0.1.0-dev.18
 
 - Recognizes a current quoted delivery when a transport recipient appears as a quoted recipient
